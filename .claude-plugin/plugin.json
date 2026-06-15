@@ -1,0 +1,15 @@
+{
+  "name": "dev-loop",
+  "version": "0.1.0",
+  "description": "The virtuous development loop for Rails. Opus plans, a parallel Sonnet specialist army implements (via roundhouse), Codex adversarially reviews, a fresh Opus reviewer rates the work against the plan, Sonnet agents fix until an 8.5 quality gate passes, learnings are captured, and a PR is opened. Wraps @kurenn/roundhouse and @openai-codex/codex.",
+  "author": {
+    "name": "Abraham Kuri",
+    "email": "abkuri88@gmail.com",
+    "url": "https://github.com/kurenn"
+  },
+  "homepage": "https://github.com/kurenn/dev-loop",
+  "repository": "https://github.com/kurenn/dev-loop",
+  "license": "MIT",
+  "keywords": ["rails", "ruby", "agents", "orchestration", "code-review", "tdd", "codex", "claude-code"],
+  "skills": "./skills"
+}
