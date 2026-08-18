@@ -1,21 +1,28 @@
 # dev-loop
 
-A **virtuous development loop** for Rails, as a Claude Code plugin. One command chains
-six phases with deliberate model tiers and an independent quality gate:
+A **virtuous development loop** as a Claude Code plugin — for any stack. One command
+chains nine phases with deliberate model tiers and a gate that can't be talked around:
 
 | Phase | Who | Model |
 |---|---|---|
-| 1 · Plan & orchestrate | the session | **Opus**, max reasoning — writes `PLAN.md` (the grading contract) + worktree |
-| 2 · Implement | specialist army | **Sonnet**, parallel, via `/rails-feature` (roundhouse) |
-| 3 · Adversarial review | Codex | `/codex:adversarial-review` — challenges approach & assumptions |
-| 4 · Rate against the plan | independent reviewer | **Opus** — scores each axis + overall plan-fidelity |
-| 5 · Fix (gated) | specialist army | **Sonnet** — only if `overall < 8.5` or any axis `< 7`; ≤ 2 rounds |
-| 6 · Learnings & ship | the session | Opus — appends durable learnings, opens the PR |
+| 1 · Triage & frame | the session | trivial work exits here; everything else picks a size tier |
+| 2 · Plan | one agent | **fable** — worktree, provisioning, baseline, `PLAN.md` |
+| 3 · Critique & revise | a *fresh* agent, then the planner | **fable** — attacks the plan cold, planner answers every point, then you approve |
+| 4 · Execute | unit agents, parallel *within* a wave | **sonnet** — disjoint file ownership, dependency-ordered waves |
+| 5 · Mechanical gate | the session | build · test · lint · typecheck · security, against a baseline |
+| 6 · Adversarial review | Codex, else a fresh agent | challenges the approach, not just defects |
+| 7 · Rate | an independent rater | **opus** — threshold-blind, severity-ranked findings |
+| 8 · Gate & fix | unit agents | **sonnet** — zero blocking findings, ≤ 2 rounds, delta-judged |
+| 9 · Learnings & ship | the session | appends durable learnings, commits, opens the PR |
 
-The point is the **separation of concerns**: a planner, an independent implementation
-army, an adversarial reviewer, an *independent* rater (not the implementer grading
-itself), a gated fixer, and a learning sink — so quality is enforced by structure, not
-willpower.
+The point is **separation of concerns**: a planner, an independent critic of the plan, an
+implementation army, an adversarial reviewer, an independent rater, a gated fixer, and a
+learning sink — so quality comes from structure, not willpower.
+
+It stops **once**, after the plan, and waits for you — the cheapest quality lever in the
+loop, since a wrong direction caught there costs less than any fix round. Everything after
+that runs unattended. `/dev-loop --auto <task>` skips the checkpoint and runs straight
+through to a PR; autonomous mode is never assumed, only asked for.
 
 ## Install
 
@@ -24,51 +31,59 @@ willpower.
 /plugin install dev-loop@kurenn
 ```
 
-### Prerequisites (recommended)
-
-dev-loop *wraps* two other plugins. It degrades gracefully without them, but it's
-designed to run with both:
-
-```sh
-/plugin install roundhouse@kurenn      # Phase 2: the Sonnet specialist army
-/plugin install codex@openai-codex     # Phase 3: the adversarial review
-```
-
-Without roundhouse, Phase 2 falls back to directly-spawned Sonnet agents. Without codex,
-Phase 3 falls back to an Opus adversarial reviewer agent.
-
 ## Usage
 
 ```sh
-/dev-loop-setup            # once per repo: checks prereqs, scaffolds config + learnings file
+/dev-loop-setup            # once per repo: detects and verifies the project profile
 /dev-loop <feature or bug> # run the full loop
 ```
 
-## Per-project configuration
+`/dev-loop-setup` is not optional busywork — it is what makes the loop stack-agnostic. It
+detects and **verifies** how this project installs, tests, lints, typechecks and scans,
+which gitignored files a fresh worktree needs to boot, and which specialist subagents
+exist for the stack, then writes it all into a `## Dev-loop config` block in `CLAUDE.md`.
+The loop reads that profile instead of guessing at runtime.
 
-The loop reads a `## Dev-loop config` block from the repo's `CLAUDE.md` (scaffolded by
-`/dev-loop-setup`). Override any of:
+## Optional accelerators
 
-- **Gate** — default `overall ≥ 8.5 AND every axis ≥ 7`
-- **Base / extra rating axes** — e.g. add `design-system fidelity` for UI-heavy apps
-- **Critical paths** — e.g. `money / auth / KYC`; those axes also require `≥ 8.5`
-- **Learnings file** — default `docs/dev-loop-learnings.md`
-- **Fix-round cap** — default `2`
-- **PR conventions** — repo-specific screenshot/embed/`gh` quirks
+Neither is required; both are auto-detected:
 
-Defaults apply when the block is absent, so `/dev-loop` works before setup — but
-`/dev-loop-setup` tailors the gate and rigor tiers to the project.
+```sh
+/plugin install codex@openai-codex     # Phase 6: out-of-family adversarial review
+/plugin install roundhouse@kurenn      # Phase 4: Rails specialist subagents
+```
 
-## Why model tiers
+Without codex, Phase 6 uses an in-family reviewer — which shares training and blind spots
+with the implementers, and is labelled as weaker in the PR. Without stack specialists,
+Phase 4 uses general agents. `gh` is likewise optional: unauthenticated, the loop stops at
+a commit and hands you the push and PR commands.
 
-- **Opus plans and rates** because planning and judging quality are the high-leverage,
-  reasoning-heavy steps.
-- **Sonnet implements and fixes** because the work is parallelizable and well-specified
-  once the plan exists — an army of cheaper agents covers more ground.
-- **A *separate* Opus rates** the work so the grader isn't the implementer. Self-rating
-  inflates; independent rating against a written plan does not.
-- **Codex challenges** from outside the Claude family for a genuinely adversarial second
-  opinion on the approach, not just defect-spotting.
+## Design notes
+
+**Why waves.** Parallel agents in one worktree collide. So `PLAN.md` must decompose the
+work into units with **disjoint file ownership**, grouped into waves — parallel within a
+wave, serial between them, interfaces and schemas before their consumers. Ownership is
+declared in the plan and enforced in every agent brief.
+
+**Why the gate is mechanical.** An unanchored 1–10 self-report clusters in the 7–9 band
+and drifts between rounds, so it makes a poor control. The gate here is: mechanical checks
+green against a pre-implementation baseline, **zero blocking findings**, every major
+finding fixed or waived with a written reason. The 1–10 axis scores still get produced —
+they go in the PR body as telemetry, where being approximate is harmless.
+
+**Why the rater is blind.** It is a fresh agent that never sees the threshold, judges
+against `PLAN.md` and the acceptance criteria, and ranks findings by severity rather than
+being asked for a number to compare against a bar it already knows.
+
+**Why model tiers.** Fable plans and critiques, because plan errors are amplified by every
+phase downstream and are the most expensive errors in the loop. Sonnet implements and
+fixes, because the work is parallelizable and well-specified once the plan exists. A
+*different* model — opus — rates, so the grader shares neither the implementer's context
+nor the planner's.
+
+**Everything is a file.** `PLAN.md`, `PLAN-CRITIQUE.md`, `REVIEW-round-N.md`,
+`RATING-round-N.md` and `LOOP_STATE.md` all live in the worktree — so the loop is
+auditable, resumable after an interruption, and survives context compaction.
 
 ## License
 
