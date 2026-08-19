@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.2
+
+- **Push and PR are separated.** Phase 9 gated the `git push` on `gh` being usable, so a
+  repo with a working git remote and no GitHub had finished, committed work stranded on a
+  local branch. Caught by a benchmark run against a bare local origin: the loop committed,
+  correctly detected no GitHub, and then declined to push at all. Pushing is git; only the
+  PR needs `gh`.
+
 ## 0.2.1
 
 Latency and cost fixes, from measuring an actual run. A one-line bug fix — a missing

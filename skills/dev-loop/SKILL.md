@@ -361,12 +361,15 @@ deliberate: an unanchored self-report clustered in the 7–9 band is not a contr
    loop stopped at the gate** — failed runs teach the most.
 2. **Commit.** Nothing before this phase commits, so the worktree is dirty. Stage
    everything and commit with a conventional message referencing the plan.
-3. **Push and open the PR** — only if `GH=ok` from Step 0:
-   ```sh
-   cd "$WT" && git push -u origin "$BR" && gh pr create --base "$MAIN" ...
-   ```
-   If `gh` is unavailable or unauthenticated, stop at the commit, and tell the user the
-   branch name and the exact push + PR commands to run. Do not fail the loop over it.
+3. **Push, then open the PR — these are two separate decisions.**
+   - **Push whenever the repo has a git remote**, regardless of `GH`:
+     `cd "$WT" && git push -u origin "$BR"`. Pushing is git; a repo can have a perfectly
+     good remote and no GitHub at all. Never withhold the push because `gh` is missing —
+     that strands finished, committed work on a local branch for no reason.
+   - **Then**, only if `GH=ok` from Step 0: `gh pr create --base "$MAIN" ...`.
+   - No remote at all → stop at the commit. Remote but no GitHub → push, then give the
+     user the exact PR command for their host.
+   - Never fail the loop over either.
 4. **PR body:**
    - **Summary** — what changed and why (1–3 bullets)
    - **Independent rating** — the axis scores as telemetry, plus the finding counts by
