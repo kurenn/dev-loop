@@ -1,0 +1,921 @@
+diff --git a/.gitignore b/.gitignore
+index 8732ef4..67e7de1 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -11,3 +11,6 @@
+ /config/master.key
+ /.env
+ /.worktrees/
++
++# dev-loop bookkeeping (worktree-local; review artifacts are committed)
++/LOOP_STATE.md
+diff --git a/app/controllers/api/v1/base_controller.rb b/app/controllers/api/v1/base_controller.rb
+new file mode 100644
+index 0000000..26b8865
+--- /dev/null
++++ b/app/controllers/api/v1/base_controller.rb
+@@ -0,0 +1,35 @@
++class Api::V1::BaseController < ActionController::API
++  # rescue_from matches last-registered-first, so the catch-all StandardError
++  # handler must be registered before the more specific RecordNotFound
++  # handler for the specific one to win.
++  rescue_from StandardError, with: :render_internal_error
++  rescue_from ActiveRecord::RecordNotFound, with: :render_not_found
++
++  private
++
++  def render_not_found
++    render json: { error: "not_found" }, status: :not_found
++  end
++
++  # Fallback for anything raised inside API actions so it doesn't escape to
++  # ActionDispatch::PublicExceptions (which would respond with HTML for
++  # clients that send no Accept header). When the app is configured to show
++  # full error detail locally (development, and this app's test env), we
++  # re-raise instead so Rails' own DebugExceptions middleware -- and, in
++  # tests, a visible failure with a real backtrace -- takes over; the JSON
++  # contract below only matters where nobody is watching the console, i.e.
++  # production.
++  #
++  # The Rails.error.report call is a hook for a future error-tracking
++  # subscriber (e.g. an APM gem) to pick up; this app has none configured
++  # today, so it currently writes nothing anywhere. The record that survives
++  # in every environment is Rails 8.1's own ActionController::LogSubscriber
++  # #rescue_from_callback line, logged regardless of whether report is
++  # called.
++  def render_internal_error(exception)
++    raise exception if Rails.application.config.consider_all_requests_local
++
++    Rails.error.report(exception, handled: false, severity: :error, source: "api")
++    render json: { error: "internal_error" }, status: :internal_server_error
++  end
++end
+diff --git a/app/controllers/api/v1/projects_controller.rb b/app/controllers/api/v1/projects_controller.rb
+new file mode 100644
+index 0000000..4f7e38c
+--- /dev/null
++++ b/app/controllers/api/v1/projects_controller.rb
+@@ -0,0 +1,15 @@
++class Api::V1::ProjectsController < Api::V1::BaseController
++  def index
++    result = Pagination.paginate(Project.active.order(:name, :id), page: params[:page], per_page: params[:per_page])
++
++    render json: {
++      projects: result[:records].as_json(only: [ :id, :name, :archived ]),
++      pagination: result[:pagination]
++    }
++  end
++
++  def show
++    project = Project.find(params[:id])
++    render json: project.as_json(only: [ :id, :name, :description, :archived ])
++  end
++end
+diff --git a/app/controllers/concerns/pagination.rb b/app/controllers/concerns/pagination.rb
+new file mode 100644
+index 0000000..9d93a87
+--- /dev/null
++++ b/app/controllers/concerns/pagination.rb
+@@ -0,0 +1,82 @@
++# Hand-rolled limit/offset pagination for API list endpoints.
++#
++# Usable both as a module function:
++#
++#   Pagination.paginate(Project.active, page: params[:page], per_page: params[:per_page])
++#
++# and as a mixin:
++#
++#   class ProjectsController < ApplicationController
++#     include Pagination
++#
++#     def index
++#       result = paginate(Project.active, page: params[:page], per_page: params[:per_page])
++#     end
++#   end
++#
++# Accepts raw param values (strings, nil, anything) — never raises and never
++# signals a 4xx for malformed pagination params. Invalid/absent values fall
++# back to defaults; out-of-range per_page is silently clamped to the max.
++#
++# Parsing note: page/per_page accept only strict decimal digit strings
++# (`\A\d+\z`, e.g. "10", "010" -> 10). Anything else — non-numeric strings,
++# whitespace padding, signs, underscores, non-decimal prefixes like "0x10",
++# array/hash-shaped params, nil — falls back to the default. This is
++# intentional and stricter than Ruby's `Integer()` conversion rules, which
++# would otherwise interpret zero-padded values like "010" as octal.
++module Pagination
++  extend self
++
++  DEFAULT_PER_PAGE = 25
++  MAX_PER_PAGE = 100
++
++  # @param scope [ActiveRecord::Relation]
++  # @param page [Object] raw, unvalidated param value
++  # @param per_page [Object] raw, unvalidated param value
++  # @return [Hash] { records:, pagination: { page:, per_page:, total_count:, total_pages: } }
++  def paginate(scope, page:, per_page:)
++    parsed_page = parse_positive_integer(page, default: 1)
++    parsed_per_page = clamp_per_page(parse_positive_integer(per_page, default: DEFAULT_PER_PAGE))
++
++    total_count = scope.count
++    total_pages = (total_count / parsed_per_page.to_f).ceil
++    offset = (parsed_page - 1) * parsed_per_page
++
++    # Short-circuit rather than issuing LIMIT/OFFSET once the offset is past
++    # the end of the result set. This avoids handing the DB driver an offset
++    # so large it can't bind (e.g. SQLite/Postgres bigint ceilings around
++    # 2**63), and it also skips a pointless query for any other past-the-end
++    # page. `parsed_page` itself is never clamped — callers get back exactly
++    # the page they asked for, with truthful (empty) results.
++    records = offset >= total_count ? scope.none : scope.limit(parsed_per_page).offset(offset)
++
++    {
++      records: records,
++      pagination: {
++        page: parsed_page,
++        per_page: parsed_per_page,
++        total_count: total_count,
++        total_pages: total_pages
++      }
++    }
++  end
++
++  private
++
++  # Parses a raw value into a positive Integer, falling back to `default`
++  # for nil, non-numeric strings, non-decimal numeric strings (e.g. "0x10",
++  # "1_00", "10.5"), whitespace-padded or signed strings (e.g. " 5 ", "+3"),
++  # array/hash-shaped params, zero, and negative values. Only strings
++  # consisting entirely of decimal digits are accepted, so "010" parses as
++  # 10 (never octal). Never raises.
++  def parse_positive_integer(raw, default:)
++    return default unless raw.to_s.match?(/\A\d+\z/)
++
++    value = raw.to_s.to_i
++    value <= 0 ? default : value
++  end
++
++  def clamp_per_page(value)
++    [value, MAX_PER_PAGE].min
++  end
++end
+diff --git a/app/models/project.rb b/app/models/project.rb
+index 6c0e59f..daaaf34 100644
+--- a/app/models/project.rb
++++ b/app/models/project.rb
+@@ -3,5 +3,11 @@ class Project < ApplicationRecord
+ 
+   validates :name, presence: true
+ 
++  # `archived` is a nullable boolean with no DB default, and `where(archived: false)`
++  # does not match `archived IS NULL`. So `Project.create!(name: "X")` yields a row
++  # invisible to this scope (and to every list endpoint built on it) while still
++  # fetchable by id. `/api/v1` mirrors this deliberately for parity with `/projects`
++  # (see PLAN.md Assumption 7) — don't "fix" the scope alone; the real fix is a
++  # backfill plus a `NOT NULL DEFAULT false` migration, deliberately out of scope here.
+   scope :active, -> { where(archived: false) }
+ end
+diff --git a/config/routes.rb b/config/routes.rb
+index 6080898..1b9faa6 100644
+--- a/config/routes.rb
++++ b/config/routes.rb
+@@ -1,4 +1,10 @@
+ Rails.application.routes.draw do
+   resources :projects, only: [ :index, :show ]
+   root "projects#index"
++
++  namespace :api, defaults: { format: :json } do
++    namespace :v1 do
++      resources :projects, only: [ :index, :show ]
++    end
++  end
+ end
+diff --git a/test/controllers/api/v1/projects_controller_test.rb b/test/controllers/api/v1/projects_controller_test.rb
+new file mode 100644
+index 0000000..dd72a4a
+--- /dev/null
++++ b/test/controllers/api/v1/projects_controller_test.rb
+@@ -0,0 +1,293 @@
++require "test_helper"
++
++class Api::V1::ProjectsControllerTest < ActionDispatch::IntegrationTest
++  test "index returns envelope with projects and pagination" do
++    get api_v1_projects_url
++    assert_response :success
++
++    body = JSON.parse(response.body)
++    assert_equal %w[pagination projects].sort, body.keys.sort
++    assert_kind_of Array, body["projects"]
++    assert_kind_of Hash, body["pagination"]
++    assert_equal %w[page per_page total_count total_pages].sort, body["pagination"].keys.sort
++  end
++
++  test "per_page defaults to 25" do
++    get api_v1_projects_url
++    assert_response :success
++
++    body = JSON.parse(response.body)
++    assert_equal 25, body["pagination"]["per_page"]
++  end
++
++  test "per_page is clamped to 100" do
++    now = Time.current
++    rows = 120.times.map do |i|
++      { name: format("Clamp-%03d", i), archived: false, created_at: now, updated_at: now }
++    end
++    Project.insert_all(rows)
++
++    get api_v1_projects_url(per_page: 100_000)
++    assert_response :success
++
++    body = JSON.parse(response.body)
++    assert_equal 100, body["pagination"]["per_page"]
++    assert_equal 100, body["projects"].size
++  end
++
++  test "clamped per_page drives offset" do
++    # Take the fixture-active row out of the running so the seeded rows below
++    # are the entire active scope, making the expected slice unambiguous.
++    projects(:alpha).update!(archived: true)
++
++    now = Time.current
++    rows = 120.times.map do |i|
++      { name: format("Offset-%03d", i), archived: false, created_at: now, updated_at: now }
++    end
++    Project.insert_all(rows)
++
++    expected_ids = Project.active.order(:name, :id).offset(100).limit(100).pluck(:id)
++    assert_equal 20, expected_ids.size, "sanity check: 120 seeded rows, page 2 of 100 should hold the last 20"
++
++    get api_v1_projects_url(page: 2, per_page: 100_000)
++    assert_response :success
++
++    body = JSON.parse(response.body)
++    assert_equal 100, body["pagination"]["per_page"]
++    assert_equal 2, body["pagination"]["page"]
++    assert_equal 120, body["pagination"]["total_count"]
++
++    returned_ids = body["projects"].map { |p| p["id"] }
++    assert_equal 20, returned_ids.size
++    assert_equal expected_ids, returned_ids
++  end
++
++  test "invalid page and per_page fall back to defaults" do
++    invalid_values = [ nil, "abc", "10.5", "0", "-1" ]
++
++    invalid_values.each do |value|
++      get api_v1_projects_url(value.nil? ? {} : { page: value })
++      assert_response :success
++
++      body = JSON.parse(response.body)
++      assert_equal 1, body["pagination"]["page"], "page=#{value.inspect} should fall back to 1"
++      assert_equal 25, body["pagination"]["per_page"], "page=#{value.inspect} should not affect per_page"
++    end
++
++    invalid_values.each do |value|
++      get api_v1_projects_url(value.nil? ? {} : { per_page: value })
++      assert_response :success
++
++      body = JSON.parse(response.body)
++      assert_equal 1, body["pagination"]["page"], "per_page=#{value.inspect} should not affect page"
++      assert_equal 25, body["pagination"]["per_page"], "per_page=#{value.inspect} should fall back to 25"
++    end
++  end
++
++  test "page beyond last returns empty list" do
++    expected_total = Project.active.count
++
++    get api_v1_projects_url(page: 999_999)
++    assert_response :success
++
++    body = JSON.parse(response.body)
++    assert_equal [], body["projects"]
++    assert_equal expected_total, body["pagination"]["total_count"]
++    assert_equal (expected_total / 25.0).ceil, body["pagination"]["total_pages"]
++  end
++
++  test "oversized page returns empty list not 500" do
++    expected_total = Project.active.count
++    expected_total_pages = (expected_total / 25.0).ceil
++
++    oversized_values = [
++      9_223_372_036_854_775_807,    # int64 max
++      368_934_881_474_191_034,     # first page whose (page - 1) * 25 overflows int64
++      Integer("1" + "0" * 39)      # far beyond any fixed-width integer
++    ]
++
++    oversized_values.each do |page_value|
++      get api_v1_projects_url(page: page_value)
++      assert_response :success, "page=#{page_value} should not error"
++
++      body = JSON.parse(response.body)
++      assert_equal [], body["projects"], "page=#{page_value} should return no projects"
++      assert_equal expected_total, body["pagination"]["total_count"], "page=#{page_value} total_count should reflect real data"
++      assert_equal expected_total_pages, body["pagination"]["total_pages"], "page=#{page_value} total_pages should reflect real data"
++      assert_equal page_value, body["pagination"]["page"], "page=#{page_value} should be echoed back exactly"
++    end
++  end
++
++  test "pages slice the ordered scope disjointly" do
++    prefix = "AAA-Page"
++    # "AAA-Page" sorts before the "Alpha" fixture (second char 'A' < 'l' under
++    # SQLite's default binary collation), so these three seeded rows land at
++    # the front of the active scope, ordered by name then id.
++    seeded = [ "#{prefix}-1", "#{prefix}-2", "#{prefix}-3" ].map { |name| Project.create!(name: name, archived: false) }
++    expected_order = seeded.sort_by { |p| [ p.name, p.id ] }
++
++    get api_v1_projects_url(page: 1, per_page: 2)
++    assert_response :success
++    body1 = JSON.parse(response.body)
++    page1_ids = body1["projects"].map { |p| p["id"] }
++    assert_equal [ expected_order[0].id, expected_order[1].id ], page1_ids
++    assert_equal 1, body1["pagination"]["page"]
++
++    get api_v1_projects_url(page: 2, per_page: 2)
++    assert_response :success
++    body2 = JSON.parse(response.body)
++    page2_ids = body2["projects"].map { |p| p["id"] }
++    page2_seeded_ids = body2["projects"].select { |p| p["name"].start_with?(prefix) }.map { |p| p["id"] }
++    assert_equal [ expected_order[2].id ], page2_seeded_ids
++    assert_equal 2, body2["pagination"]["page"]
++
++    assert_empty page1_ids & page2_ids
++  end
++
++  test "index returns active projects ordered by name with list fields" do
++    Project.create!(name: "AAB-Sort-1", archived: false)
++    Project.create!(name: "AAB-Sort-3", archived: false)
++    Project.create!(name: "AAB-Sort-2", archived: false)
++    Project.create!(name: "AAB-Sort-0-archived", archived: true)
++
++    get api_v1_projects_url(per_page: 100)
++    assert_response :success
++
++    body = JSON.parse(response.body)
++    names = body["projects"].map { |p| p["name"] }
++    assert_not_includes names, "Zulu"
++    assert_not_includes names, "AAB-Sort-0-archived"
++
++    sorted_prefixed = body["projects"].select { |p| p["name"].start_with?("AAB-Sort") }
++    assert_equal [ "AAB-Sort-1", "AAB-Sort-2", "AAB-Sort-3" ], sorted_prefixed.map { |p| p["name"] }
++
++    assert_equal body["projects"], body["projects"].sort_by { |p| [ p["name"], p["id"] ] }
++
++    body["projects"].each do |project|
++      assert_equal %w[archived id name].sort, project.keys.sort
++      assert_equal false, project["archived"]
++    end
++  end
++
++  test "null archived is excluded from index but shown by id" do
++    null_project = Project.create!(name: "NullFlag", archived: nil)
++
++    get api_v1_projects_url(per_page: 100)
++    assert_response :success
++
++    body = JSON.parse(response.body)
++    assert_not_includes body["projects"].map { |p| p["id"] }, null_project.id
++    assert_equal Project.where(archived: false).count, body["pagination"]["total_count"]
++
++    get api_v1_project_url(null_project)
++    assert_response :success
++
++    show_body = JSON.parse(response.body)
++    assert_equal null_project.id, show_body["id"]
++  end
++
++  test "show returns a project" do
++    project = Project.create!(name: "ShowTest", description: "Some description", archived: false)
++
++    get api_v1_project_url(project)
++    assert_response :success
++
++    body = JSON.parse(response.body)
++    assert_equal %w[archived description id name].sort, body.keys.sort
++    assert_equal project.id, body["id"]
++    assert_equal "ShowTest", body["name"]
++    assert_equal "Some description", body["description"]
++    assert_equal false, body["archived"]
++  end
++
++  test "show returns an archived project" do
++    project = Project.create!(name: "ShowArchivedTest", description: "Archived description", archived: true)
++
++    get api_v1_project_url(project)
++    assert_response :success
++
++    body = JSON.parse(response.body)
++    assert_equal project.id, body["id"]
++    assert_equal "ShowArchivedTest", body["name"]
++    assert_equal true, body["archived"]
++  end
++
++  test "show returns 404 JSON for missing project" do
++    get api_v1_project_url(999_999)
++    assert_response :not_found
++    assert_includes response.content_type, "application/json"
++
++    assert_equal({ "error" => "not_found" }, JSON.parse(response.body))
++  end
++
++  test "unhandled errors render json in the api namespace when local error detail is off" do
++    project = Project.create!(name: "ErrorTarget", archived: false)
++
++    # The catch-all only renders JSON when the app is *not* configured to
++    # show full local error detail (i.e. production-like). Toggle it off
++    # for the duration of this request so the test genuinely exercises the
++    # JSON-rendering branch instead of passing vacuously under the test
++    # environment's default (consider_all_requests_local = true).
++    original_local = Rails.application.config.consider_all_requests_local
++    Rails.application.config.consider_all_requests_local = false
++
++    # Temporarily replace Project.find (a method the controller genuinely
++    # calls) with one that raises something other than
++    # ActiveRecord::RecordNotFound, so a real request through the full stack
++    # proves the StandardError catch-all -- not just the RecordNotFound
++    # handler -- is what renders the response. No mocking gem is available
++    # (Minitest 6 dropped Minitest::Mock), so this defines then removes a
++    # singleton method directly; removing it falls back to the original
++    # ActiveRecord-provided `find` via the normal ancestor chain.
++    Project.define_singleton_method(:find) { |*| raise ArgumentError, "boom" }
++    begin
++      get api_v1_project_url(project)
++    ensure
++      Project.singleton_class.send(:remove_method, :find)
++      Rails.application.config.consider_all_requests_local = original_local
++    end
++
++    assert_response :internal_server_error
++    assert_includes response.content_type, "application/json"
++
++    body = JSON.parse(response.body)
++    assert_equal "internal_error", body["error"]
++
++    # Prove the stub is actually gone and normal behaviour is restored.
++    assert_equal project, Project.find(project.id)
++  end
++
++  test "unhandled errors propagate when local error detail is on" do
++    project = Project.create!(name: "ErrorTarget", archived: false)
++
++    # With consider_all_requests_local true (development, and this app's
++    # test env by default), the catch-all must re-raise rather than convert
++    # the exception into a JSON 500, so Rails' own DebugExceptions
++    # middleware / a real test failure with a backtrace takes over instead
++    # of a debugging developer getting a bare JSON error body.
++    assert Rails.application.config.consider_all_requests_local,
++      "sanity check: this test relies on the test environment's default of consider_all_requests_local = true"
++
++    Project.define_singleton_method(:find) { |*| raise ArgumentError, "boom" }
++    begin
++      assert_raises(ArgumentError) { get api_v1_project_url(project) }
++    ensure
++      Project.singleton_class.send(:remove_method, :find)
++    end
++
++    # Prove the stub is actually gone and normal behaviour is restored.
++    assert_equal project, Project.find(project.id)
++  end
++
++  test "paginate is not an action method" do
++    assert_equal %w[index show], Api::V1::ProjectsController.action_methods.to_a.sort
++  end
++
++  test "api does not enforce allow_browser" do
++    get api_v1_projects_url, headers: { "User-Agent" => "" }
++    assert_response :success
++
++    assert_includes Api::V1::ProjectsController.ancestors, ActionController::API
++    assert_not_includes Api::V1::ProjectsController.ancestors, ApplicationController
++  end
++end
+diff --git a/test/controllers/concerns/pagination_test.rb b/test/controllers/concerns/pagination_test.rb
+new file mode 100644
+index 0000000..32a5607
+--- /dev/null
++++ b/test/controllers/concerns/pagination_test.rb
+@@ -0,0 +1,323 @@
++require "test_helper"
++
++class PaginationTest < ActiveSupport::TestCase
++  PREFIX = "PaginationTest".freeze
++
++  def scoped_projects
++    Project.where("name LIKE ?", "#{PREFIX}%").order(:name)
++  end
++
++  def seed_projects(count)
++    now = Time.current
++    rows = (1..count).map do |i|
++      {
++        name: format("%s-%03d", PREFIX, i),
++        archived: false,
++        created_at: now,
++        updated_at: now
++      }
++    end
++    Project.insert_all!(rows)
++  end
++
++  # --- parsing / clamping of raw params ---
++
++  test "absent page and per_page fall back to defaults" do
++    result = Pagination.paginate(scoped_projects, page: nil, per_page: nil)
++
++    assert_equal 1, result[:pagination][:page]
++    assert_equal Pagination::DEFAULT_PER_PAGE, result[:pagination][:per_page]
++  end
++
++  test "non-numeric page and per_page fall back to defaults" do
++    result = Pagination.paginate(scoped_projects, page: "abc", per_page: "xyz")
++
++    assert_equal 1, result[:pagination][:page]
++    assert_equal Pagination::DEFAULT_PER_PAGE, result[:pagination][:per_page]
++  end
++
++  test "non-integer numeric strings like 10.5 fall back to defaults" do
++    result = Pagination.paginate(scoped_projects, page: "10.5", per_page: "10.5")
++
++    assert_equal 1, result[:pagination][:page]
++    assert_equal Pagination::DEFAULT_PER_PAGE, result[:pagination][:per_page]
++  end
++
++  test "zero page and per_page fall back to defaults" do
++    result = Pagination.paginate(scoped_projects, page: "0", per_page: "0")
++
++    assert_equal 1, result[:pagination][:page]
++    assert_equal Pagination::DEFAULT_PER_PAGE, result[:pagination][:per_page]
++  end
++
++  test "negative page and per_page fall back to defaults" do
++    result = Pagination.paginate(scoped_projects, page: "-5", per_page: "-5")
++
++    assert_equal 1, result[:pagination][:page]
++    assert_equal Pagination::DEFAULT_PER_PAGE, result[:pagination][:per_page]
++  end
++
++  test "per_page above the cap is silently clamped, never an error" do
++    seed_projects(3)
++
++    result = Pagination.paginate(scoped_projects, page: "1", per_page: "1000")
++
++    assert_equal Pagination::MAX_PER_PAGE, result[:pagination][:per_page]
++  end
++
++  test "valid numeric strings are parsed as-is" do
++    result = Pagination.paginate(scoped_projects, page: "2", per_page: "10")
++
++    assert_equal 2, result[:pagination][:page]
++    assert_equal 10, result[:pagination][:per_page]
++  end
++
++  test "empty string page and per_page fall back to defaults" do
++    result = Pagination.paginate(scoped_projects, page: "", per_page: "")
++
++    assert_equal 1, result[:pagination][:page]
++    assert_equal Pagination::DEFAULT_PER_PAGE, result[:pagination][:per_page]
++  end
++
++  # --- strict decimal parsing: zero-padded strings must be read as decimal,
++  # never octal, and every other Integer()-style leniency (hex prefixes,
++  # underscore grouping, whitespace padding, explicit signs) must fall back
++  # to the default rather than being silently accepted. ---
++
++  test "a zero-padded page string is parsed as decimal, not octal" do
++    seed_projects(15)
++
++    # Under octal interpretation "010" would be 8; under decimal (the
++    # correct contract) it must be 10. Assert on the actual returned record,
++    # not just the echoed page number, so this pins the real behavior.
++    result = Pagination.paginate(scoped_projects, page: "010", per_page: "1")
++
++    assert_equal 10, result[:pagination][:page]
++    assert_equal [ "#{PREFIX}-010" ], result[:records].to_a.map(&:name)
++  end
++
++  test "a zero-padded per_page string is parsed as decimal, not octal" do
++    seed_projects(15)
++
++    result = Pagination.paginate(scoped_projects, page: "1", per_page: "010")
++
++    assert_equal 10, result[:pagination][:per_page]
++    assert_equal (1..10).map { |i| format("%s-%03d", PREFIX, i) }, result[:records].to_a.map(&:name)
++  end
++
++  test "hex-prefixed page and per_page fall back to defaults, never interpreted as hex" do
++    result = Pagination.paginate(scoped_projects, page: "0x10", per_page: "0x10")
++
++    assert_equal 1, result[:pagination][:page]
++    assert_equal Pagination::DEFAULT_PER_PAGE, result[:pagination][:per_page]
++  end
++
++  test "underscore-grouped page and per_page fall back to defaults" do
++    result = Pagination.paginate(scoped_projects, page: "1_00", per_page: "1_00")
++
++    assert_equal 1, result[:pagination][:page]
++    assert_equal Pagination::DEFAULT_PER_PAGE, result[:pagination][:per_page]
++  end
++
++  test "whitespace-padded page and per_page fall back to defaults" do
++    result = Pagination.paginate(scoped_projects, page: " 5 ", per_page: " 5 ")
++
++    assert_equal 1, result[:pagination][:page]
++    assert_equal Pagination::DEFAULT_PER_PAGE, result[:pagination][:per_page]
++  end
++
++  test "explicitly signed page and per_page fall back to defaults" do
++    result = Pagination.paginate(scoped_projects, page: "+3", per_page: "+3")
++
++    assert_equal 1, result[:pagination][:page]
++    assert_equal Pagination::DEFAULT_PER_PAGE, result[:pagination][:per_page]
++  end
++
++  test "array-shaped page param falls back to default instead of raising" do
++    result = Pagination.paginate(scoped_projects, page: [ "1" ], per_page: nil)
++
++    assert_equal 1, result[:pagination][:page]
++  end
++
++  test "hash-shaped page param falls back to default instead of raising" do
++    params = ActionController::Parameters.new(page: { a: "1" })
++
++    result = Pagination.paginate(scoped_projects, page: params[:page], per_page: nil)
++
++    assert_equal 1, result[:pagination][:page]
++  end
++
++  # --- meta hash shape ---
++
++  test "pagination hash has exactly the four expected integer keys" do
++    result = Pagination.paginate(scoped_projects, page: "1", per_page: "25")
++
++    assert_equal %i[page per_page total_count total_pages].sort, result[:pagination].keys.sort
++    result[:pagination].each_value { |v| assert_kind_of Integer, v }
++  end
++
++  test "empty scope yields zero total_count and zero total_pages" do
++    result = Pagination.paginate(scoped_projects, page: nil, per_page: nil)
++
++    assert_equal 0, result[:pagination][:total_count]
++    assert_equal 0, result[:pagination][:total_pages]
++    assert_equal [], result[:records].to_a
++  end
++
++  test "page beyond the last page returns empty records with accurate totals" do
++    seed_projects(3)
++
++    result = Pagination.paginate(scoped_projects, page: "999", per_page: "2")
++
++    assert_equal [], result[:records].to_a
++    assert_equal 3, result[:pagination][:total_count]
++    assert_equal 2, result[:pagination][:total_pages]
++    assert_equal 999, result[:pagination][:page]
++  end
++
++  # --- windowing: proves the clamped per_page is the applied SQL LIMIT ---
++
++  test "with 3 rows and per_page 2, page 1 returns two records" do
++    seed_projects(3)
++
++    result = Pagination.paginate(scoped_projects, page: "1", per_page: "2")
++    records = result[:records].to_a
++
++    assert_equal 2, records.size
++    assert_equal [ "#{PREFIX}-001", "#{PREFIX}-002" ], records.map(&:name)
++    assert_equal 2, result[:pagination][:per_page]
++    assert_equal 3, result[:pagination][:total_count]
++    assert_equal 2, result[:pagination][:total_pages]
++  end
++
++  test "with 3 rows and per_page 2, page 2 returns one record" do
++    seed_projects(3)
++
++    result = Pagination.paginate(scoped_projects, page: "2", per_page: "2")
++    records = result[:records].to_a
++
++    assert_equal 1, records.size
++    assert_equal [ "#{PREFIX}-003" ], records.map(&:name)
++  end
++
++  test "with 3 rows and per_page 2, page 3 returns zero records" do
++    seed_projects(3)
++
++    result = Pagination.paginate(scoped_projects, page: "3", per_page: "2")
++    records = result[:records].to_a
++
++    assert_equal 0, records.size
++  end
++
++  test "over-cap per_page applies the clamped value as the SQL limit, not the raw one" do
++    seed_projects(3)
++
++    result = Pagination.paginate(scoped_projects, page: "1", per_page: "1000")
++    records = result[:records].to_a
++
++    # All 3 seeded rows fit under the 100 cap, so this alone wouldn't prove
++    # clamping; the assertion below on pagination[:per_page] combined with
++    # the dedicated window tests above proves the clamp is applied to LIMIT.
++    assert_equal 3, records.size
++    assert_equal Pagination::MAX_PER_PAGE, result[:pagination][:per_page]
++  end
++
++  test "over-cap per_page clamps the actual SQL limit when rows exceed the cap" do
++    seed_projects(Pagination::MAX_PER_PAGE + 5)
++
++    result = Pagination.paginate(scoped_projects, page: "1", per_page: "99999")
++    records = result[:records].to_a
++
++    assert_equal Pagination::MAX_PER_PAGE, records.size
++    assert_equal Pagination::MAX_PER_PAGE, result[:pagination][:per_page]
++    assert_equal Pagination::MAX_PER_PAGE + 5, result[:pagination][:total_count]
++  end
++
++  # --- usable as a mixin, per Assumption 13 ---
++
++  class DummyIncluder
++    include Pagination
++
++    def index(scope, raw_page, raw_per_page)
++      paginate(scope, page: raw_page, per_page: raw_per_page)
++    end
++  end
++
++  test "paginate is usable as an included instance method" do
++    seed_projects(3)
++
++    result = DummyIncluder.new.index(scoped_projects, "1", "2")
++
++    assert_equal 2, result[:records].to_a.size
++    assert_equal 2, result[:pagination][:per_page]
++  end
++
++  # --- offset overflow: computed offset must never reach the DB driver's
++  # bind ceiling (SQLite/Postgres bigint, ~2**63), regardless of how large
++  # the requested page is. The requested `page` value must still be echoed
++  # verbatim in the pagination meta. ---
++
++  test "int64-max page does not raise and returns empty records with truthful totals" do
++    seed_projects(3)
++    raw_page = (2**63 - 1).to_s
++
++    result = Pagination.paginate(scoped_projects, page: raw_page, per_page: nil)
++
++    assert_equal [], result[:records].to_a
++    assert_equal 3, result[:pagination][:total_count]
++    assert_equal 1, result[:pagination][:total_pages]
++    assert_equal 2**63 - 1, result[:pagination][:page]
++  end
++
++  test "the exact first page value whose computed offset overflows int64 does not raise" do
++    seed_projects(3)
++    raw_page = "368934881474191034"
++
++    result = Pagination.paginate(scoped_projects, page: raw_page, per_page: nil)
++
++    assert_equal [], result[:records].to_a
++    assert_equal 3, result[:pagination][:total_count]
++    assert_equal 1, result[:pagination][:total_pages]
++    assert_equal 368934881474191034, result[:pagination][:page]
++  end
++
++  test "a page value that does not even fit in int64 does not raise" do
++    seed_projects(3)
++    raw_page = "1" + "0" * 39
++
++    result = Pagination.paginate(scoped_projects, page: raw_page, per_page: nil)
++
++    assert_equal [], result[:records].to_a
++    assert_equal 3, result[:pagination][:total_count]
++    assert_equal 1, result[:pagination][:total_pages]
++    assert_equal (10**39), result[:pagination][:page]
++  end
++
++  test "a 40-digit decimal page string parses to its true bignum value and yields an empty page" do
++    seed_projects(3)
++    raw_page = "9" * 40
++
++    result = Pagination.paginate(scoped_projects, page: raw_page, per_page: nil)
++
++    assert_equal [], result[:records].to_a
++    assert_equal 3, result[:pagination][:total_count]
++    assert_equal 1, result[:pagination][:total_pages]
++    assert_equal raw_page.to_i, result[:pagination][:page]
++  end
++
++  test "the clamped per_page, not the raw one, determines the offset window" do
++    seed_projects(120)
++
++    result = Pagination.paginate(scoped_projects, page: "2", per_page: "100000")
++    records = result[:records].to_a
++
++    # per_page is clamped to 100, so page 2 starts at offset 100 (record
++    # 101), not at the raw-per_page-driven offset of 100000. If the offset
++    # were computed from the raw per_page instead of the clamped one, this
++    # would return zero records instead of the last 20.
++    assert_equal 20, records.size
++    assert_equal (101..120).map { |i| format("%s-%03d", PREFIX, i) }, records.map(&:name)
++    assert_equal Pagination::MAX_PER_PAGE, result[:pagination][:per_page]
++    assert_equal 2, result[:pagination][:page]
++  end
++end
+diff --git a/test/integration/legacy_projects_regression_test.rb b/test/integration/legacy_projects_regression_test.rb
+new file mode 100644
+index 0000000..8dd9182
+--- /dev/null
++++ b/test/integration/legacy_projects_regression_test.rb
+@@ -0,0 +1,95 @@
++require "test_helper"
++
++# Characterization test for the legacy /projects and /projects/:id endpoints.
++#
++# A new /api/v1/projects namespace is being introduced alongside these
++# endpoints, sharing config/routes.rb. This test pins the *current*,
++# unimproved behavior of ProjectsController byte-for-byte-ish so that any
++# accidental regression in routing, serialization, ordering, or scoping
++# fails loudly. Do not "fix" anything this test finds — if it fails, the
++# legacy behavior changed and that's the bug.
++class LegacyProjectsRegressionTest < ActionDispatch::IntegrationTest
++  test "GET /projects returns a bare JSON array with exactly id/name/archived keys" do
++    get projects_url
++    assert_response :success
++
++    body = JSON.parse(response.body)
++    assert_kind_of Array, body, "legacy index must render a bare array, not an envelope"
++    assert_not_empty body
++
++    body.each do |project_json|
++      assert_equal %w[archived id name], project_json.keys.sort,
++        "legacy index must only expose id/name/archived, no description or timestamps"
++    end
++  end
++
++  test "GET /projects is active-only: excludes archived fixture, includes active fixture" do
++    get projects_url
++    assert_response :success
++
++    names = JSON.parse(response.body).map { |p| p["name"] }
++    assert_includes names, "Alpha"
++    assert_not_includes names, "Zulu"
++  end
++
++  test "GET /projects orders results by name ascending" do
++    low = Project.create!(name: "AAARegressionOrderLow", archived: false)
++    mid = Project.create!(name: "MMMRegressionOrderMid", archived: false)
++    high = Project.create!(name: "ZZZRegressionOrderHigh", archived: false)
++
++    get projects_url
++    assert_response :success
++
++    ordered_names = JSON.parse(response.body)
++      .map { |p| p["name"] }
++      .select { |name| name.include?("RegressionOrder") }
++
++    assert_equal [ low.name, mid.name, high.name ], ordered_names
++  end
++
++  test "GET /projects/:id returns a bare JSON object with exactly id/name/description/archived keys" do
++    get project_url(projects(:alpha))
++    assert_response :success
++
++    body = JSON.parse(response.body)
++    assert_kind_of Hash, body, "legacy show must render a bare object, not an array or envelope"
++    assert_equal %w[archived description id name], body.keys.sort
++  end
++
++  test "GET /projects/:id has no active filter and returns archived projects too" do
++    get project_url(projects(:zulu))
++    assert_response :success
++
++    body = JSON.parse(response.body)
++    assert_equal "Zulu", body["name"]
++    assert_equal true, body["archived"]
++  end
++
++  test "NULL-archived parity: legacy index excludes NULL archived, legacy show still returns it" do
++    null_flag_project = Project.create!(name: "RegressionNullFlagProject", archived: nil)
++
++    get projects_url
++    assert_response :success
++    index_names = JSON.parse(response.body).map { |p| p["name"] }
++    assert_not_includes index_names, null_flag_project.name,
++      "Project.active uses where(archived: false), which does not match NULL rows in SQL"
++
++    get project_url(null_flag_project)
++    assert_response :success
++    body = JSON.parse(response.body)
++    assert_equal null_flag_project.name, body["name"]
++    assert_nil body["archived"]
++  end
++
++  test "root route maps to projects#index and returns the same bare array" do
++    get root_url
++    assert_response :success
++
++    body = JSON.parse(response.body)
++    assert_kind_of Array, body
++
++    names = body.map { |p| p["name"] }
++    assert_includes names, "Alpha"
++    assert_not_includes names, "Zulu"
++  end
++end

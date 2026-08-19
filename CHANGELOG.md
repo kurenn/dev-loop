@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.2.4
+
+- **Disproportion is now a MAJOR rating finding.** Blind graders, shown two implementations
+  of the same task with the flow identity stripped, unanimously preferred v0.1's — 8.25 vs
+  3.75 on simplicity and 8.50 vs 5.75 on clarity — despite both passing an identical hidden
+  acceptance suite. The loop's extra spend had gone into an abstraction with one caller, an
+  error handler that cannot fire, and 45% comment density. Nothing in the rating rewarded
+  proportion, so nothing checked it.
+- The rater is told explicitly that more code is never better by itself, and fix rounds are
+  told the fix must be the smallest change that resolves the finding, since fix rounds are
+  where scaffolding accretes.
+
 ## 0.2.3
 
 - **File ownership is now enforced, not merely instructed.** The agent brief already told

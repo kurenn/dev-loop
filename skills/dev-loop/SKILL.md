@@ -323,13 +323,20 @@ Return exactly these sections:
      criterion. Ships a defect.
    MAJOR = a real problem that does not block shipping: an untested branch on a risky
      path, a significant performance risk, avoidable complexity that will cost later.
+     **Disproportion is a MAJOR finding.** Code that solves a problem the task does not
+     have counts against the work: speculative generality, an abstraction with one caller,
+     an error handler that cannot fire, a dual-form API where one form is unused, or
+     commentary that restates the code. Blind graders preferred a 99-line implementation
+     over a 144-line one for the same passing behaviour, scoring it 8.25 vs 3.75 on
+     simplicity, so this is not a stylistic aside.
    MINOR = style, naming, nits.
    For each: file:line, what is wrong, and the concrete fix. Judge each Phase 6
    adversarial challenge as real or not, with reasoning.
 3. SCORES — 1-10 on: correctness, simplicity, test coverage, clarity, performance,
    security (plus any extra axes listed below). 10 is always best: a 10 on security
    means no security concern. These are telemetry, not a pass/fail judgment — score
-   honestly rather than charitably.
+   honestly rather than charitably. More code is never better by itself: judge fitness
+   to the task, and mark down a solution that is larger than the problem.
 4. PLAN DRIFT — where the implementation departed from PLAN.md, and whether each
    departure was justified.
 
@@ -352,7 +359,9 @@ deliberate: an unanchored self-report clustered in the 7–9 band is not a contr
 
 - **Gate met** → Phase 9.
 - **Not met** → dispatch **sonnet** agents (brief contract preamble, ownership from the
-  plan) to fix the BLOCKING findings first, then the MAJORs. Then **re-run Phase 5**, and
+  plan) to fix the BLOCKING findings first, then the MAJORs. A fix must be the smallest
+  change that resolves the finding: fix rounds are where scaffolding accretes, because
+  adding code always looks like progress. Removing code is a legitimate fix. Then **re-run Phase 5**, and
   re-run Phase 7 as a **delta judgment**: give the new rater `RATING-round-N.md` plus the
   diff since the fix, and ask it to verify each prior finding was actually addressed and
   to flag anything the fix broke. Delta judgment is better calibrated and far cheaper
