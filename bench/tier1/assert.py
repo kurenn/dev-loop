@@ -113,7 +113,15 @@ R["A4_work_committed"] = a4
 # --- A5: the branch was pushed to origin ------------------------------------
 rc, out, _ = sh("git", "for-each-ref", "--format=%(refname:short)", "refs/heads", cwd=ORIGIN)
 pushed = [b for b in out.splitlines() if b != "main"]
-R["A5_pushed_to_origin"] = {"pass": bool(pushed), "branches": pushed,
+# A pushed ref proves nothing on its own: a branch created off main and pushed before any
+# commit lands here looking like success. Require it to actually carry commits.
+with_commits = []
+for b in pushed:
+    rc2, cnt, _ = sh("git", "rev-list", "--count", f"main..{b}", cwd=ORIGIN)
+    if rc2 == 0 and cnt.isdigit() and int(cnt) > 0:
+        with_commits.append(f"{b} (+{cnt})")
+R["A5_pushed_to_origin"] = {"pass": bool(with_commits), "branches": pushed,
+                            "branches_with_commits": with_commits,
                             "why": "v0.1 called gh pr create without ever committing or pushing"}
 
 # --- A6: shipping was handled, not silently failed --------------------------
@@ -206,17 +214,22 @@ M = {
 # exit 124 is `timeout` killing the run. Anything the loop had not reached yet is
 # unknown, not failed. Blanking these is the difference between a measurement and a
 # fabricated finding.
-truncated = meta.get("exit_code") == 124
+result_seen = any(e.get("type") == "result" for e in events)
+truncated = meta.get("exit_code") == 124 or not result_seen
 if truncated:
     for aid in ("A4_work_committed", "A5_pushed_to_origin", "A6_ship_handled"):
         R[aid]["pass"] = None
         R[aid]["truncated"] = True
-        R[aid]["why_unknown"] = "run killed by BENCH_TIMEOUT before Phase 9; not a failure"
+        R[aid]["why_unknown"] = ("run did not complete (timeout, or the transcript has no "
+                                 "result event); unreached phases are unknown, not failed")
 
 out = {"meta": meta, "truncated": truncated, "assertions": R, "metrics": M}
 json.dump(out, open(os.path.join(RUN, "results.json"), "w"), indent=2)
 
-banner = "  [TRUNCATED at BENCH_TIMEOUT - post-Phase-6 assertions unknown]" if truncated else ""
+banner = ""
+if truncated:
+    why = "BENCH_TIMEOUT" if meta.get("exit_code") == 124 else "no result event - run ended early"
+    banner = f"  [INCOMPLETE: {why} - unreached assertions unknown]"
 print(f"\n{meta['flow']}  {meta['task']}  #{meta['idx']}{banner}")
 for k, v in R.items():
     if isinstance(v, dict) and "pass" in v:

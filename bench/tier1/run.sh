@@ -33,11 +33,18 @@ MODEL="${BENCH_MODEL:-opus}"
 export GEM_HOME="$(ruby -e 'print Gem.user_dir')"
 export PATH="$GEM_HOME/bin:$PATH"
 
+# Never reuse a run directory. `git clone` into a non-empty dir fails, the script would
+# carry on against the previous run's checkout, and a stale meta.json would sit beside a
+# live transcript. Auto-increment instead of colliding.
+while [ -e "$RUNDIR" ]; do
+  IDX=$((IDX+1))
+  RUNDIR="$BENCH/results/$STAMP/$FLOW/$TASK-$IDX"
+done
 mkdir -p "$RUNDIR"
 APP="$RUNDIR/app"
 
 # Fresh clone + its own bare origin, so pushes from parallel runs can't collide.
-git clone -q --local "$PRISTINE" "$APP"
+git clone -q --local "$PRISTINE" "$APP" || { echo "clone failed into $APP"; exit 1; }
 git clone -q --bare "$PRISTINE" "$RUNDIR/origin.git"
 git -C "$APP" remote remove origin 2>/dev/null
 git -C "$APP" remote add origin "$RUNDIR/origin.git"
