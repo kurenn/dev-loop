@@ -1,6 +1,12 @@
 #!/usr/bin/env python3
-"""Collapse a Tier 1 matrix into one table: assertions per (flow, task), plus cost."""
-import json, os, sys, collections
+"""Aggregate a Tier 1 matrix across repeated runs.
+
+Single runs are fine for the binary assertions, which are near-deterministic. They are
+NOT fine for cost and wall clock: two byte-identical arms differed by 37% in wall clock
+and 23% in cost, so anything under n=3 is reading noise. Cost/time are therefore reported
+as mean +/- sample stdev with n, and never as a single figure.
+"""
+import json, os, statistics, sys, collections
 
 ROOT = os.path.abspath(sys.argv[1])
 IDS = ["A1_main_checkout_clean", "A2_worktree_created", "A3_worktree_bootable",
@@ -16,33 +22,48 @@ for dirpath, _, files in os.walk(ROOT):
         except Exception:
             pass
 if not runs:
-    print("no results.json found under", ROOT); sys.exit(0)
+    print("no results.json under", ROOT); sys.exit(0)
 
-runs.sort(key=lambda r: (r["meta"]["flow"], r["meta"]["task"]))
-w = max(len(f"{r['meta']['flow']} {r['meta']['task']}") for r in runs) + 2
-print(f"{'run':<{w}}" + "".join(f"{s:<11}" for s in SHORT) + "cost      artifacts")
-print("-" * (w + 11 * len(SHORT) + 22))
-
-tally = collections.defaultdict(lambda: collections.Counter())
+groups = collections.defaultdict(list)
 for r in runs:
-    m, A = r["meta"], r["assertions"]
+    groups[(r["meta"]["flow"], r["meta"]["task"])].append(r)
+
+w = max(len(f"{f} {t}") for f, t in groups) + 2
+print(f"{'arm / task':<{w}}{'n':<4}" + "".join(f"{s:<11}" for s in SHORT))
+print("-" * (w + 4 + 11 * len(SHORT)))
+
+for (flow, task), rs in sorted(groups.items()):
     cells = []
     for i in IDS:
-        p = (A.get(i) or {}).get("pass")
-        cells.append("PASS" if p is True else ("FAIL" if p is False else "-"))
-        if p is True:
-            tally[m["flow"]][i] += 1
-    arts = A.get("A8_artifacts") or {}
-    have = [k.replace(".md", "").replace("-round-*", "") for k, v in arts.items() if v]
-    cost = r["metrics"].get("cost_usd")
-    if r.get("truncated"):
-        have.append("TRUNCATED")
-    print(f"{m['flow'] + ' ' + m['task']:<{w}}" + "".join(f"{c:<11}" for c in cells)
-          + f"${cost if cost is None else round(cost, 2):<9}" + ",".join(have))
+        vals = [(r["assertions"].get(i) or {}).get("pass") for r in rs]
+        known = [v for v in vals if v is not None]
+        if not known:
+            cells.append("-")
+        elif all(known):
+            cells.append(f"PASS {len(known)}/{len(known)}")
+        elif not any(known):
+            cells.append(f"FAIL 0/{len(known)}")
+        else:
+            cells.append(f"{sum(known)}/{len(known)}")
+    inc = sum(1 for r in rs if r.get("truncated"))
+    tag = f" ({inc} incomplete)" if inc else ""
+    print(f"{flow + ' ' + task:<{w}}{len(rs):<4}" + "".join(f"{c:<11}" for c in cells) + tag)
 
-print()
-for flow in sorted(tally):
-    n = sum(1 for r in runs if r["meta"]["flow"] == flow)
-    passed = sum(tally[flow].values())
-    print(f"{flow}: {passed}/{n * len(IDS)} assertions passed across {n} runs   "
-          f"total cost ${sum((r['metrics'].get('cost_usd') or 0) for r in runs if r['meta']['flow'] == flow):.2f}")
+
+def stat(vals):
+    vals = [v for v in vals if v is not None]
+    if not vals:
+        return "n/a"
+    if len(vals) == 1:
+        return f"{vals[0]:.2f} (n=1, no variance estimate)"
+    return f"{statistics.mean(vals):.2f} +/- {statistics.stdev(vals):.2f} (n={len(vals)})"
+
+
+print("\ncost and wall clock — complete runs only")
+for (flow, task), rs in sorted(groups.items()):
+    ok = [r for r in rs if not r.get("truncated")]
+    if not ok:
+        print(f"  {flow} {task}: no complete runs")
+        continue
+    print(f"  {flow} {task}:  ${stat([r['metrics'].get('cost_usd') for r in ok])}"
+          f"   {stat([r['metrics'].get('wall_seconds') for r in ok])} s")

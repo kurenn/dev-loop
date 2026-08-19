@@ -181,10 +181,41 @@ declares_ownership = bool(re.search(r"^\s*[-*].*\bowns:", plan, re.M))
 if not declares_ownership:
     a9["note"] = "plan declares no per-unit file ownership; assertion not applicable to this flow"
 elif wt:
-    declared = set(re.findall(r"`([\w./-]+\.[a-z]{1,5})`", plan))
+    # Parse ownership from the `owns:` lines only. Regexing every backticked token out of
+    # the whole plan swept up prose (`Project.count`, `CLAUDE.md`) and missed nothing,
+    # which made the assertion measure the regex rather than the loop.
+    # An ownership clause runs from `owns:` to the `· does:` delimiter and often wraps
+    # across lines, so parse the clause, not the line.
+    declared = set()
+    for clause in re.findall(r"\bowns:(.*?)(?:·\s*does:|\n\s*\n|\Z)", plan, re.S):
+        declared |= set(re.findall(r"`([\w./*-]+)`", clause))
+
+    # Artifacts the loop authors by design are never "outside ownership".
+    LOOP_ARTIFACTS = ("PLAN.md", "PLAN-CRITIQUE.md", "LOOP_STATE.md", "RED-PROOF.md")
+    def is_loop_artifact(f):
+        base = os.path.basename(f)
+        return (base in LOOP_ARTIFACTS or base.startswith(("REVIEW-round", "RATING-round"))
+                or "dev-loop-learnings" in f)
+
+    # A generated migration carries a timestamp the plan cannot know in advance, and
+    # schema.rb is a mechanical by-product of running one. Compare on the stable part.
+    def norm(f):
+        d, b = os.path.split(f)
+        return os.path.join(d, re.sub(r"^\d{10,}_", "", b))
+    norm_declared = {norm(x) for x in declared}
+    dirs_declared = {os.path.dirname(x) for x in declared if os.path.dirname(x)}
+
+    def covered(f):
+        if norm(f) in norm_declared or f in declared:
+            return True
+        if os.path.basename(f) == "schema.rb" and "db/migrate" in " ".join(dirs_declared):
+            return True
+        # A trailing / or * declares a directory or prefix.
+        return any(x.endswith(("/", "*")) and f.startswith(x.rstrip("*")) for x in declared)
+
     rc, out, _ = git("diff", "--name-only", "main...HEAD", cwd=wt)
-    changed = [f for f in out.splitlines() if f and not f.startswith(("PLAN", "REVIEW", "RATING", "LOOP_STATE"))]
-    outside = [f for f in changed if f not in declared]
+    changed = [f for f in out.splitlines() if f and not is_loop_artifact(f)]
+    outside = [f for f in changed if not covered(f)]
     a9.update(declared=sorted(declared)[:40], changed=changed, outside=outside,
               **{"pass": len(outside) == 0 if declared else None})
 R["A9_ownership_conformance"] = a9
