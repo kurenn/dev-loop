@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.3
+
+- **File ownership is now enforced, not merely instructed.** The agent brief already told
+  each unit to stay inside its declared file set, and the benchmark breached it in 4 of 4
+  runs — undeclared test files, `app/models/project.rb`, `.gitignore`. Phase 4 now checks
+  `git status --porcelain` against the wave's ownership after every wave and requires each
+  violation to be declared or reverted before the next wave starts.
+- **Units that create files must declare a directory or glob.** A filename that does not
+  exist yet cannot be enumerated, so a unit writing a migration or a new test was being
+  set up to fail. One benchmark plan declared no `db/migrate/` ownership at all on a task
+  whose whole purpose was a schema change.
+- Every acceptance criterion must now be owned by exactly one unit.
+
 ## 0.2.2
 
 - **Push and PR are separated.** Phase 9 gated the `git push` on `gh` being usable, so a

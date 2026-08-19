@@ -180,6 +180,14 @@ decomposition is being padded with prose — cut the prose, not the units. It mu
   Rules, non-optional:
   - Within a wave, unit ownership sets are **disjoint**. Two units that need the same
     file are one unit.
+  - A unit that will **create** files — a migration, a new test, a new module — must
+    declare a **directory prefix** (`db/migrate/`) or a **glob**
+    (`test/models/*_test.rb`). You cannot enumerate a filename that does not exist yet,
+    and an under-declared unit leaves its agent no legal move: it either stalls or
+    violates the contract. Measured: ownership was breached in every benchmark run, most
+    often by a new test file, and once by a migration that no unit had claimed at all on
+    a task whose entire purpose was a schema change.
+  - Every acceptance criterion must be owned by exactly one unit.
   - A wave may depend only on waves before it. Interfaces, schemas, types and shared
     contracts go in the earliest wave; their consumers come later.
   - Tests for a unit belong to that unit unless the profile says otherwise.
@@ -235,6 +243,13 @@ Do not implement anything yourself.
   would re-plan the work against a different contract.
 - **After each wave**, run the profile's test command before starting the next. A broken
   wave 1 makes every downstream wave garbage.
+- **Enforce ownership after each wave — mechanically, not on trust.** Run
+  `git status --porcelain` in the worktree and check every changed path against that
+  wave's declared ownership. The brief already tells agents to stay inside their set and
+  it was breached in *every* benchmark run, so the instruction alone does not hold. For
+  anything outside: either amend `PLAN.md` to declare it and record the amendment for the
+  rater, or revert the file. Never start the next wave with an unresolved violation, and
+  never let an undeclared file reach the rating phase unexplained.
 - If an agent reports it needed a file it did not own, resolve the overlap yourself,
   update `PLAN.md`, and note the amendment — do not let two agents fight over a file.
 
