@@ -52,11 +52,18 @@ as long. That difference is real, unlike the single-run figures reported earlier
 - **Tier selection works.** t03 → `Light — 2 units`, t04 → `Full — 4 units across 2 waves`.
   Plan cap held at exactly 120 lines on both Light runs.
 
-### Unexplained
+### Diff size, decomposed
 
-v0.2.2 produced 1708 insertions on t04 against v0.1's 714 — more than double the code for
-the same task. Whether that is thoroughness or bloat is not something these assertions can
-answer; it needs the blind-graded Tier 3 that has not been run.
+The headline 714 vs 1708 insertions on t04 is mostly not application code:
+
+| t04 | v0.1 | v0.2.2 | ratio |
+|---|---|---|---|
+| everything | 714 | 1708 | 2.4x |
+| code only (no `.md`) | 351 | 858 | 2.4x |
+| **app code** (`app/`, `config/`, `db/`) | **99** | **144** | 1.45x |
+| **test code** | **252** | **711** | 2.8x |
+
+Tier 3 answers what this means.
 
 ---
 
@@ -119,3 +126,68 @@ live run, where the gate passed work its own rater flagged as needing action bef
   grader. Neither shows which flow writes better software. That needs Tier 3.
 - v0.2's plan checkpoint cannot run headless, so every v0.2.x arm ran `--auto`. Its
   highest-value safeguard is untested here.
+
+
+---
+
+## Tier 3 — does either write better software?
+
+Both t04 branches already existed, so this needed no new loop runs.
+
+### 3a. Hidden acceptance tests
+
+Eight tests written from the **task text**, never seen by either flow, and deliberately
+tolerant of response shape — v0.1 returns `{data:, pagination:}`, v0.2.2 returns
+`{projects:, pagination:}`, and the task specified behaviour, not a JSON schema. They cover
+the list and single endpoints, archived exclusion, pagination state, the server-side cap
+under `per_page=100000`, real paging without overlap, the untouched legacy endpoint, and
+malformed params.
+
+| arm | result |
+|---|---|
+| v0.1 | **8 runs, 19 assertions, 0 failures** |
+| v0.2.2 | **8 runs, 19 assertions, 0 failures** |
+
+Functionally indistinguishable on the specification.
+
+### 3b. Blind pairwise grading
+
+Four graders, loop artifacts stripped (they identify the flow instantly), A/B position
+alternated so position bias would surface as a split.
+
+| arm | fitness | test_quality | simplicity | clarity |
+|---|---|---|---|---|
+| v0.1 | 8.25 ± 0.43 | 7.50 ± 0.50 | **8.25 ± 0.43** | **8.50 ± 0.50** |
+| v0.2.2 | 7.75 ± 0.43 | 7.75 ± 0.43 | **3.75 ± 0.43** | **5.75 ± 0.43** |
+
+**Overall preference: v0.1, 4 of 4.**
+
+v0.2.2's 2.8x test code bought +0.25 on test quality and cost 4.5 on simplicity. The
+graders' specific claims were checked against the source and all held:
+
+- `Pagination` uses `extend self`; the `include Pagination` form appears only in a comment.
+- The `StandardError` handler re-raises wherever `consider_all_requests_local`, and reports
+  to a subscriber the app does not have — its own comment concedes it "currently writes
+  nothing anywhere".
+- 66 comment lines in 145 lines of app code (45%), against v0.1's 13 in 86 (15%).
+
+### What this overturns
+
+An earlier recommendation in this exercise — that v0.2.2 is worth roughly double the cost
+because it wins on correctness — does not survive. It wins the **mechanical** assertions
+(worktree provisioning, never reviewing on red). It produces **functionally equivalent**
+code, judged **materially worse** by blind graders, for **2.07x the money** and **1.80x
+the time**.
+
+The loop scored simplicity all along, but scores are telemetry and gate nothing, so
+nothing resisted accretion — and fix rounds, where a MAJOR must be "fixed or waived",
+systematically reward adding code. Addressed in 0.2.4 by making disproportion a MAJOR
+finding in its own right; **not yet re-measured.**
+
+### Limits specific to Tier 3
+
+One task, one pair of implementations, four graders. LLM graders may carry a general
+preference for concision, which is why every claim above was verified against the source
+rather than taken on the grader's word. The hidden suite tests the specification; it
+cannot see maintainability, which is exactly what 3b is for and exactly where a grader is
+least reliable.
