@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.2.1
+
+Latency and cost fixes, from measuring an actual run. A one-line bug fix — a missing
+column default — took 35 minutes, cost $12.72 and produced a 397-line plan. The phase
+breakdown showed where it went.
+
+- **The size tier is a hard branch, not a hint.** It was one advisory sentence, and the
+  orchestrator drifted past it into the full nine-phase treatment with three execution
+  waves. Now it is a table the tier selects a whole row from: plan cap, Phase 3 shape,
+  wave count, fix cap, and whether Codex runs. A schema change no longer forces Full on
+  its own — a migration plus its test is two units.
+- **The plan critic is bounded.** Phase 3 was 44% of the run (15.5 min), much of it the
+  critic reading ActiveRecord source and writing probe scripts in /tmp to prove framework
+  behaviour empirically. It now judges the plan against the request and the repo as it
+  stands; a claim needing more than that is recorded as unverified and left to Phase 5.
+- **Critique and revise are one round trip.** The separate revise agent cost ~5 of those
+  15.5 minutes. The critic now proposes the specific edit for each point and the
+  orchestrator applies it or rebuts it in one line. Independence is preserved — the critic
+  still never authored the plan.
+- **Plan size is capped by tier** (Light 120 lines, Full 300). PLAN.md is a work contract,
+  not a design essay; overrunning the cap means prose, not decomposition.
+- Light tier skips the paid adversarial review unless a critical path is touched, and the
+  fix-round cap now derives from the tier rather than being a flat 2.
+- `bench/flows/v0.2.1/` pins this version as a third benchmark arm. v0.2 stays pinned
+  unchanged so it still matches the runs already completed against it.
+
 ## 0.2.0
 
 Stack-agnostic rewrite. The loop no longer assumes Rails, gains a plan-critique phase, a

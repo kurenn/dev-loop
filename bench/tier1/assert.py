@@ -202,10 +202,22 @@ M = {
     "diff_shortstat": changed_n,
 }
 
-out = {"meta": meta, "assertions": R, "metrics": M}
+# --- truncation guard ------------------------------------------------------
+# exit 124 is `timeout` killing the run. Anything the loop had not reached yet is
+# unknown, not failed. Blanking these is the difference between a measurement and a
+# fabricated finding.
+truncated = meta.get("exit_code") == 124
+if truncated:
+    for aid in ("A4_work_committed", "A5_pushed_to_origin", "A6_ship_handled"):
+        R[aid]["pass"] = None
+        R[aid]["truncated"] = True
+        R[aid]["why_unknown"] = "run killed by BENCH_TIMEOUT before Phase 9; not a failure"
+
+out = {"meta": meta, "truncated": truncated, "assertions": R, "metrics": M}
 json.dump(out, open(os.path.join(RUN, "results.json"), "w"), indent=2)
 
-print(f"\n{meta['flow']}  {meta['task']}  #{meta['idx']}")
+banner = "  [TRUNCATED at BENCH_TIMEOUT - post-Phase-6 assertions unknown]" if truncated else ""
+print(f"\n{meta['flow']}  {meta['task']}  #{meta['idx']}{banner}")
 for k, v in R.items():
     if isinstance(v, dict) and "pass" in v:
         p = v["pass"]

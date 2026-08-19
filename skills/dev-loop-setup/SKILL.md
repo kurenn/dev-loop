@@ -100,7 +100,7 @@ Project profile read by the `/dev-loop` skill (@kurenn/dev-loop). Verified <YYYY
 **Quality**
 - Critical paths: <e.g. money / auth — extra scrutiny and a codex re-review on fix rounds — or none>
 - Extra rating axes: <e.g. design-system fidelity — or none>
-- Fix-round cap: 2
+- Fix-round cap: from tier (Light 1, Full 2)
 
 **Ship**
 - Learnings file: docs/dev-loop-learnings.md

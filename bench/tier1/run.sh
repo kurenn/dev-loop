@@ -5,7 +5,9 @@
 #   bench/tier1/run.sh v0.1 t01-projects-crud [run-index]
 #
 # Env:
-#   BENCH_TIMEOUT   seconds before the run is killed (default 2700)
+#   BENCH_TIMEOUT   seconds before the run is killed (default 5400). Measured: a v0.2 run
+#                   was still in Phase 6 at 35 min, so anything under ~1h truncates and the
+#                   shipping assertions come back unknown rather than measured.
 #   BENCH_MODEL     orchestrator model for both arms (default opus)
 #   BENCH_STAMP     share one results dir across runs (default: new timestamp)
 set -uo pipefail
@@ -21,7 +23,7 @@ FLOWDIR="$BENCH/flows/$FLOW"
 TASKFILE="$BENCH/tier1/tasks/$TASK.md"
 STAMP="${BENCH_STAMP:-$(date +%Y%m%d-%H%M%S)}"
 RUNDIR="$BENCH/results/$STAMP/$FLOW/$TASK-$IDX"
-TIMEOUT="${BENCH_TIMEOUT:-2700}"
+TIMEOUT="${BENCH_TIMEOUT:-5400}"
 MODEL="${BENCH_MODEL:-opus}"
 
 [ -d "$PRISTINE" ] || { echo "no pristine app — run bench/tier1/setup-app.sh first"; exit 1; }
