@@ -10,9 +10,12 @@ existing HTML-era controller.
 - [ ] The list is paginated, and the page size is capped server-side so a caller cannot
       request an unbounded number of rows
 - [ ] The list response carries the pagination state alongside the records
-- [ ] Every `/api/v1` endpoint requires a valid API token
+- [ ] Every `/api/v1` endpoint requires a valid, active API token; a missing or revoked
+      token gets a 401
+- [ ] Archived projects stay reachable by id even though the list hides them
+- [ ] An unknown project id returns a JSON 404, not an HTML error page
 - [ ] The existing `/projects` endpoints keep working unchanged
-- [ ] Request tests cover the new namespace
+- [ ] Request tests cover the new namespace, including the auth rejections and the cap
 
 ## Scope
 
@@ -27,12 +30,17 @@ authenticated, and the page cap is the only thing bounding response size.
 ## Test strategy
 
 Request tests at the integration level for both endpoints, the default pagination state,
-and rejection of an unauthenticated request.
+the server-side page cap, the JSON 404, and rejection of both a missing and a revoked
+token.
 
 ## Work breakdown
 
 ### Wave 1 — routing and base controller
-- **1.1 API namespace** · owns: `config/routes.rb`,
+- **1.1 API tokens** · owns: `app/models/api_token.rb`,
+  `db/migrate/20260819000600_create_api_tokens.rb`, `test/fixtures/api_tokens.yml`
+  · does: the token record the auth check reads, with a unique index on the value
+  · done when: an active and a revoked token fixture both exist
+- **1.2 API namespace** · owns: `config/routes.rb`,
   `app/controllers/api/v1/base_controller.rb` · does: adds the namespace and the shared
   token check · done when: an unauthenticated request to any `/api/v1` route gets a 401
 

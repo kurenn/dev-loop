@@ -30,6 +30,8 @@ EXTRACT="$(cat "$BENCH/tier2/raters/_extraction.md")"
 total=0
 for VARIANT in "$CASEDIR"/variants/*/; do
   VID="$(basename "$VARIANT")"
+  # BENCH_VARIANT filters to a single variant, for iterating on the corpus cheaply.
+  if [ -n "${BENCH_VARIANT:-}" ] && [ "$VID" != "$BENCH_VARIANT" ]; then continue; fi
   DIFF="$(cat "$VARIANT/diff.patch")"
   for ARM in v0.1 v0.2; do
     RATER="$(sed '1,/^---$/d' "$BENCH/tier2/raters/$ARM.md")"

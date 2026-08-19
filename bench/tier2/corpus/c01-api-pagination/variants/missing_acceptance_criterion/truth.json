@@ -2,6 +2,6 @@
   "id": "missing_acceptance_criterion",
   "should_block": true,
   "defect_class": "missing_acceptance_criterion",
-  "description": "The response no longer carries pagination state, which PLAN.md lists as an explicit acceptance criterion. The test that asserted it was removed along with it, so the suite is green.",
+  "description": "The response no longer carries pagination state, which PLAN.md lists as an explicit acceptance criterion. The tests asserting it went with it, so the suite is green and the endpoint silently returns an unbounded-looking bare array.",
   "suite_visible": false
 }

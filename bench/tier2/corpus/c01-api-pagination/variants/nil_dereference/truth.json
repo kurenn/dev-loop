@@ -2,6 +2,6 @@
   "id": "nil_dereference",
   "should_block": true,
   "defect_class": "nil_dereference",
-  "description": "show raises NoMethodError on nil for any project with a null description. The fixture used by the test happens to have one set.",
+  "description": "show raises NoMethodError on nil for any project with a null description. Every fixture the tests fetch happens to have one set, so the suite never hits it.",
   "suite_visible": false
 }

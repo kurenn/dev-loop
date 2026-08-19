@@ -2,6 +2,6 @@
   "id": "page_cap_inverted",
   "should_block": true,
   "defect_class": "page_cap_inverted",
-  "description": "The server-side page cap is inverted: ?per_page=100000 now returns 100000 rows, and the default request returns 100 instead of 25. The suite only exercises the default path with no per_page param.",
+  "description": "The server-side page cap is inverted: ?per_page=100000 returns 100000 rows, and an unparameterised request returns 100 instead of 25. The test asserting the cap was removed with it, so the suite is green.",
   "suite_visible": false
 }

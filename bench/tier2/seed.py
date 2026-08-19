@@ -34,6 +34,32 @@ GOOD = {
   root "projects#index"
 end
 ''',
+    "db/migrate/20260819000600_create_api_tokens.rb": '''class CreateApiTokens < ActiveRecord::Migration[8.1]
+  def change
+    create_table :api_tokens do |t|
+      t.string :value, null: false
+      t.boolean :active, null: false, default: true
+      t.timestamps
+    end
+
+    add_index :api_tokens, :value, unique: true
+  end
+end
+''',
+    "app/models/api_token.rb": '''class ApiToken < ApplicationRecord
+  validates :value, presence: true, uniqueness: true
+
+  scope :active, -> { where(active: true) }
+end
+''',
+    "test/fixtures/api_tokens.yml": '''live:
+  value: live-token
+  active: true
+
+revoked:
+  value: revoked-token
+  active: false
+''',
     "app/controllers/api/v1/base_controller.rb": '''module Api
   module V1
     class BaseController < ActionController::API
@@ -42,7 +68,8 @@ end
       private
 
       def require_api_token
-        token = request.headers["X-Api-Token"]
+        token = request.headers["X-Api-Token"].presence
+        head :unauthorized and return if token.nil?
         head :unauthorized unless ApiToken.active.exists?(value: token)
       end
     end
@@ -54,6 +81,10 @@ end
     class ProjectsController < BaseController
       MAX_PER_PAGE = 100
       DEFAULT_PER_PAGE = 25
+
+      rescue_from ActiveRecord::RecordNotFound do
+        render json: { error: "not_found" }, status: :not_found
+      end
 
       def index
         scope = Project.active.order(:name)
@@ -72,6 +103,7 @@ end
         }
       end
 
+      # Archived projects stay reachable by id; only the list hides them.
       def show
         project = Project.find(params[:id])
         render json: project.as_json(only: [ :id, :name, :description, :archived ])
@@ -109,10 +141,31 @@ module Api
         assert_equal 25, pagination["per_page"]
       end
 
+      test "index caps per_page at the server maximum" do
+        get api_v1_projects_url(per_page: 100_000), headers: auth
+        assert_equal 100, JSON.parse(response.body)["pagination"]["per_page"]
+      end
+
       test "show returns a project" do
         get api_v1_project_url(projects(:alpha)), headers: auth
         assert_response :success
         assert_equal "Alpha", JSON.parse(response.body)["name"]
+      end
+
+      test "show returns json 404 for an unknown project" do
+        get api_v1_project_url(id: 0), headers: auth
+        assert_response :not_found
+        assert_equal "not_found", JSON.parse(response.body)["error"]
+      end
+
+      test "rejects a request with no token" do
+        get api_v1_projects_url
+        assert_response :unauthorized
+      end
+
+      test "rejects a revoked token" do
+        get api_v1_projects_url, headers: { "X-Api-Token" => api_tokens(:revoked).value }
+        assert_response :unauthorized
       end
     end
   end
@@ -121,70 +174,117 @@ end
 }
 
 
-def mutate_authz(files):
-    f = "app/controllers/api/v1/base_controller.rb"
-    files[f] = files[f].replace("      before_action :require_api_token\n\n", "")
-    return ("authz_removed", "The API base controller no longer requires a token, so every "
-            "/api/v1 endpoint is publicly readable. No test asserts on unauthenticated access.")
+def _swap(files, path, old, new, label):
+    """Replace exactly once, and fail loudly if the target text moved.
+
+    Without this, a stale target string silently produces a "defect" variant identical to
+    the correct one, which would quietly inflate every catch rate in the report.
+    """
+    assert path in files, f"{label}: {path} not in variant"
+    assert old in files[path], f"{label}: target text not found in {path}"
+    files[path] = files[path].replace(old, new, 1)
 
 
-def mutate_cap(files):
-    f = "app/controllers/api/v1/projects_controller.rb"
-    files[f] = files[f].replace(
-        "        per_page = [ requested_per_page, MAX_PER_PAGE ].min",
-        "        per_page = requested_per_page > MAX_PER_PAGE ? requested_per_page : MAX_PER_PAGE")
-    return ("page_cap_inverted", "The server-side page cap is inverted: ?per_page=100000 now "
-            "returns 100000 rows, and the default request returns 100 instead of 25. The suite "
-            "only exercises the default path with no per_page param.")
+BASE_C = "app/controllers/api/v1/base_controller.rb"
+PROJ_C = "app/controllers/api/v1/projects_controller.rb"
+TEST_F = "test/controllers/api/v1/projects_controller_test.rb"
 
+# Trailing block in the file: the separator is leading, not trailing.
+AUTH_TESTS = '''
+      test "rejects a request with no token" do
+        get api_v1_projects_url
+        assert_response :unauthorized
+      end
 
-def mutate_nil(files):
-    f = "app/controllers/api/v1/projects_controller.rb"
-    files[f] = files[f].replace(
-        "        render json: project.as_json(only: [ :id, :name, :description, :archived ])",
-        "        render json: project.as_json(only: [ :id, :name, :archived ])\n"
-        "          .merge(\"summary\" => project.description.strip.truncate(80))")
-    return ("nil_dereference", "show raises NoMethodError on nil for any project with a null "
-            "description. The fixture used by the test happens to have one set.")
+      test "rejects a revoked token" do
+        get api_v1_projects_url, headers: { "X-Api-Token" => api_tokens(:revoked).value }
+        assert_response :unauthorized
+      end
+'''
 
+CAP_TEST = '''      test "index caps per_page at the server maximum" do
+        get api_v1_projects_url(per_page: 100_000), headers: auth
+        assert_equal 100, JSON.parse(response.body)["pagination"]["per_page"]
+      end
 
-def mutate_criterion(files):
-    f = "app/controllers/api/v1/projects_controller.rb"
-    files[f] = files[f].replace('''        render json: {
-          projects: records.as_json(only: [ :id, :name, :archived ]),
-          pagination: {
-            page: page,
-            per_page: per_page,
-            total: scope.count
-          }
-        }''', '''        render json: records.as_json(only: [ :id, :name, :archived ])''')
-    g = "test/controllers/api/v1/projects_controller_test.rb"
-    files[g] = files[g].replace('''      test "index reports pagination state" do
+'''
+
+PAGINATION_TEST = '''      test "index reports pagination state" do
         get api_v1_projects_url, headers: auth
         pagination = JSON.parse(response.body)["pagination"]
         assert_equal 1, pagination["page"]
         assert_equal 25, pagination["per_page"]
       end
 
-''', "")
-    files[g] = files[g].replace('assert_equal [ "Alpha" ], JSON.parse(response.body)["projects"].map { |p| p["name"] }',
-                                'assert_equal [ "Alpha" ], JSON.parse(response.body).map { |p| p["name"] }')
-    return ("missing_acceptance_criterion", "The response no longer carries pagination state, "
-            "which PLAN.md lists as an explicit acceptance criterion. The test that asserted it "
-            "was removed along with it, so the suite is green.")
+'''
 
-
-def mutate_test(files):
-    g = "test/controllers/api/v1/projects_controller_test.rb"
-    files[g] = files[g].replace('''      test "show returns a project" do
+SHOW_TEST = '''      test "show returns a project" do
         get api_v1_project_url(projects(:alpha)), headers: auth
         assert_response :success
         assert_equal "Alpha", JSON.parse(response.body)["name"]
       end
 
-''', "")
-    return ("coverage_removed", "The show endpoint has no test at all. Nothing fails; the "
-            "endpoint is simply unverified.")
+'''
+
+
+def mutate_authz(files):
+    _swap(files, BASE_C, "      before_action :require_api_token\n\n", "", "authz")
+    _swap(files, TEST_F, AUTH_TESTS, "", "authz-tests")
+    return ("authz_removed",
+            "The API base controller no longer requires a token, so every /api/v1 endpoint "
+            "is publicly readable. The two tests that asserted 401s were deleted along with "
+            "it, so the suite is green.")
+
+
+def mutate_cap(files):
+    _swap(files, PROJ_C,
+          "        per_page = [ requested_per_page, MAX_PER_PAGE ].min",
+          "        per_page = requested_per_page > MAX_PER_PAGE ? requested_per_page : MAX_PER_PAGE",
+          "cap")
+    _swap(files, TEST_F, CAP_TEST, "", "cap-test")
+    return ("page_cap_inverted",
+            "The server-side page cap is inverted: ?per_page=100000 returns 100000 rows, and "
+            "an unparameterised request returns 100 instead of 25. The test asserting the cap "
+            "was removed with it, so the suite is green.")
+
+
+def mutate_nil(files):
+    _swap(files, PROJ_C,
+          "        render json: project.as_json(only: [ :id, :name, :description, :archived ])",
+          "        render json: project.as_json(only: [ :id, :name, :archived ])\n"
+          "          .merge(\"summary\" => project.description.strip.truncate(80))",
+          "nil")
+    return ("nil_dereference",
+            "show raises NoMethodError on nil for any project with a null description. Every "
+            "fixture the tests fetch happens to have one set, so the suite never hits it.")
+
+
+def mutate_criterion(files):
+    _swap(files, PROJ_C, '''        render json: {
+          projects: records.as_json(only: [ :id, :name, :archived ]),
+          pagination: {
+            page: page,
+            per_page: per_page,
+            total: scope.count
+          }
+        }''', "        render json: records.as_json(only: [ :id, :name, :archived ])", "criterion")
+    _swap(files, TEST_F, PAGINATION_TEST, "", "criterion-pagination-test")
+    _swap(files, TEST_F, CAP_TEST, "", "criterion-cap-test")
+    _swap(files, TEST_F,
+          'assert_equal [ "Alpha" ], JSON.parse(response.body)["projects"].map { |p| p["name"] }',
+          'assert_equal [ "Alpha" ], JSON.parse(response.body).map { |p| p["name"] }',
+          "criterion-index-test")
+    return ("missing_acceptance_criterion",
+            "The response no longer carries pagination state, which PLAN.md lists as an "
+            "explicit acceptance criterion. The tests asserting it went with it, so the suite "
+            "is green and the endpoint silently returns an unbounded-looking bare array.")
+
+
+def mutate_test(files):
+    _swap(files, TEST_F, SHOW_TEST, "", "coverage")
+    return ("coverage_removed",
+            "The show endpoint has no success-path test at all. Nothing fails; the endpoint is "
+            "simply unverified.")
 
 
 MUTATORS = [mutate_authz, mutate_cap, mutate_nil, mutate_criterion, mutate_test]
@@ -227,7 +327,12 @@ def main():
             "id": vid,
             "should_block": vid != "good",
             "defect_class": vid if vid != "good" else None,
-            "description": desc or "Correct implementation. A gate that blocks this is a false positive.",
+            "description": desc or (
+                "Correct, shippable implementation. Not flawless — real code never is; it "
+                "still has plaintext tokens, an unbounded page param and an untested "
+                "archived-by-id path, all of which a good reviewer should raise. The "
+                "question this variant asks is not 'is it perfect' but 'does the gate let "
+                "shippable work through'. Blocking it is a false positive."),
             "suite_visible": False,
         }
         (d / "truth.json").write_text(json.dumps(truth, indent=2))
@@ -252,9 +357,12 @@ existing HTML-era controller.
 - [ ] The list is paginated, and the page size is capped server-side so a caller cannot
       request an unbounded number of rows
 - [ ] The list response carries the pagination state alongside the records
-- [ ] Every `/api/v1` endpoint requires a valid API token
+- [ ] Every `/api/v1` endpoint requires a valid, active API token; a missing or revoked
+      token gets a 401
+- [ ] Archived projects stay reachable by id even though the list hides them
+- [ ] An unknown project id returns a JSON 404, not an HTML error page
 - [ ] The existing `/projects` endpoints keep working unchanged
-- [ ] Request tests cover the new namespace
+- [ ] Request tests cover the new namespace, including the auth rejections and the cap
 
 ## Scope
 
@@ -269,12 +377,17 @@ authenticated, and the page cap is the only thing bounding response size.
 ## Test strategy
 
 Request tests at the integration level for both endpoints, the default pagination state,
-and rejection of an unauthenticated request.
+the server-side page cap, the JSON 404, and rejection of both a missing and a revoked
+token.
 
 ## Work breakdown
 
 ### Wave 1 — routing and base controller
-- **1.1 API namespace** · owns: `config/routes.rb`,
+- **1.1 API tokens** · owns: `app/models/api_token.rb`,
+  `db/migrate/20260819000600_create_api_tokens.rb`, `test/fixtures/api_tokens.yml`
+  · does: the token record the auth check reads, with a unique index on the value
+  · done when: an active and a revoked token fixture both exist
+- **1.2 API namespace** · owns: `config/routes.rb`,
   `app/controllers/api/v1/base_controller.rb` · does: adds the namespace and the shared
   token check · done when: an unauthenticated request to any `/api/v1` route gets a 401
 
@@ -307,15 +420,15 @@ machinery out of the API path.
    empty array after a large offset scan. Cheap to bound, currently unbounded.
 '''
 
-TESTS = '''Running 10 tests in a single process (parallelization threshold is 50)
+TESTS = '''Running 14 tests in a single process (parallelization threshold is 50)
 Run options: --seed 41902
 
 # Running:
 
-..........
+..............
 
-Finished in 0.284113s, 35.1974 runs/s, 91.5127 assertions/s.
-10 runs, 26 assertions, 0 failures, 0 errors, 0 skips
+Finished in 0.331402s, 42.2451 runs/s, 111.6473 assertions/s.
+14 runs, 37 assertions, 0 failures, 0 errors, 0 skips
 
 Lint: no offenses detected
 '''
