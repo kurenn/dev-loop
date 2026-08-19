@@ -1,0 +1,102 @@
+--- /dev/null
++++ b/app/controllers/api/v1/base_controller.rb
+@@ -0,0 +1,12 @@
++module Api
++  module V1
++    class BaseController < ActionController::API
++      private
++
++      def require_api_token
++        token = request.headers["X-Api-Token"]
++        head :unauthorized unless ApiToken.active.exists?(value: token)
++      end
++    end
++  end
++end
+--- /dev/null
++++ b/app/controllers/api/v1/projects_controller.rb
+@@ -0,0 +1,37 @@
++module Api
++  module V1
++    class ProjectsController < BaseController
++      MAX_PER_PAGE = 100
++      DEFAULT_PER_PAGE = 25
++
++      def index
++        scope = Project.active.order(:name)
++        page = [ params[:page].to_i, 1 ].max
++        per_page = [ requested_per_page, MAX_PER_PAGE ].min
++
++        records = scope.offset((page - 1) * per_page).limit(per_page)
++
++        render json: {
++          projects: records.as_json(only: [ :id, :name, :archived ]),
++          pagination: {
++            page: page,
++            per_page: per_page,
++            total: scope.count
++          }
++        }
++      end
++
++      def show
++        project = Project.find(params[:id])
++        render json: project.as_json(only: [ :id, :name, :description, :archived ])
++      end
++
++      private
++
++      def requested_per_page
++        raw = params[:per_page].to_i
++        raw.positive? ? raw : DEFAULT_PER_PAGE
++      end
++    end
++  end
++end
+--- a/config/routes.rb
++++ b/config/routes.rb
+@@ -1,4 +1,11 @@
+ Rails.application.routes.draw do
+   resources :projects, only: [ :index, :show ]
++
++  namespace :api do
++    namespace :v1 do
++      resources :projects, only: [ :index, :show ]
++    end
++  end
++
+   root "projects#index"
+ end
+--- /dev/null
++++ b/test/controllers/api/v1/projects_controller_test.rb
+@@ -0,0 +1,30 @@
++require "test_helper"
++
++module Api
++  module V1
++    class ProjectsControllerTest < ActionDispatch::IntegrationTest
++      def auth
++        { "X-Api-Token" => api_tokens(:live).value }
++      end
++
++      test "index returns active projects" do
++        get api_v1_projects_url, headers: auth
++        assert_response :success
++        assert_equal [ "Alpha" ], JSON.parse(response.body)["projects"].map { |p| p["name"] }
++      end
++
++      test "index reports pagination state" do
++        get api_v1_projects_url, headers: auth
++        pagination = JSON.parse(response.body)["pagination"]
++        assert_equal 1, pagination["page"]
++        assert_equal 25, pagination["per_page"]
++      end
++
++      test "show returns a project" do
++        get api_v1_project_url(projects(:alpha)), headers: auth
++        assert_response :success
++        assert_equal "Alpha", JSON.parse(response.body)["name"]
++      end
++    end
++  end
++end

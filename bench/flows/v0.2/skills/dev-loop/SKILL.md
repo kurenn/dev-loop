@@ -33,7 +33,7 @@ ROOT=$(git rev-parse --show-toplevel) || exit 1
 MAIN=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
 [ -n "$MAIN" ] || MAIN=$(git rev-parse --verify -q main >/dev/null && echo main || echo master)
 CODEX_DIR=$(ls -d ~/.claude/plugins/cache/openai-codex/codex/*/ 2>/dev/null | sort -V | tail -1)
-gh repo view >/dev/null 2>&1 && GH=ok || GH=unavailable   # auth AND a GitHub remote
+gh auth status >/dev/null 2>&1 && GH=ok || GH=unavailable
 echo "ROOT=$ROOT MAIN=$MAIN GH=$GH CODEX_DIR=${CODEX_DIR:-none}"
 ```
 

@@ -1,0 +1,7 @@
+{
+  "id": "authz_removed",
+  "should_block": true,
+  "defect_class": "authz_removed",
+  "description": "The API base controller no longer requires a token, so every /api/v1 endpoint is publicly readable. No test asserts on unauthenticated access.",
+  "suite_visible": false
+}

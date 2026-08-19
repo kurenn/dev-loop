@@ -1,0 +1,47 @@
+{
+  "case": "c01-api-pagination",
+  "variants": [
+    {
+      "id": "good",
+      "should_block": false,
+      "defect_class": null,
+      "description": "Correct implementation. A gate that blocks this is a false positive.",
+      "suite_visible": false
+    },
+    {
+      "id": "authz_removed",
+      "should_block": true,
+      "defect_class": "authz_removed",
+      "description": "The API base controller no longer requires a token, so every /api/v1 endpoint is publicly readable. No test asserts on unauthenticated access.",
+      "suite_visible": false
+    },
+    {
+      "id": "page_cap_inverted",
+      "should_block": true,
+      "defect_class": "page_cap_inverted",
+      "description": "The server-side page cap is inverted: ?per_page=100000 now returns 100000 rows, and the default request returns 100 instead of 25. The suite only exercises the default path with no per_page param.",
+      "suite_visible": false
+    },
+    {
+      "id": "nil_dereference",
+      "should_block": true,
+      "defect_class": "nil_dereference",
+      "description": "show raises NoMethodError on nil for any project with a null description. The fixture used by the test happens to have one set.",
+      "suite_visible": false
+    },
+    {
+      "id": "missing_acceptance_criterion",
+      "should_block": true,
+      "defect_class": "missing_acceptance_criterion",
+      "description": "The response no longer carries pagination state, which PLAN.md lists as an explicit acceptance criterion. The test that asserted it was removed along with it, so the suite is green.",
+      "suite_visible": false
+    },
+    {
+      "id": "coverage_removed",
+      "should_block": true,
+      "defect_class": "coverage_removed",
+      "description": "The show endpoint has no test at all. Nothing fails; the endpoint is simply unverified.",
+      "suite_visible": false
+    }
+  ]
+}

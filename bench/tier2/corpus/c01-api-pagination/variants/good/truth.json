@@ -1,0 +1,7 @@
+{
+  "id": "good",
+  "should_block": false,
+  "defect_class": null,
+  "description": "Correct implementation. A gate that blocks this is a false positive.",
+  "suite_visible": false
+}

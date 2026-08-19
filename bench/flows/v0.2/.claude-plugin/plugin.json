@@ -1,0 +1,6 @@
+{
+  "name": "dev-loop",
+  "version": "0.0.0",
+  "description": "Benchmark arm: dev-loop v0.2, pinned. Loaded via --plugin-dir so both arms expose the same /dev-loop command and differ only in the skill body.",
+  "skills": "./skills"
+}

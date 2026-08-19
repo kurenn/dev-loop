@@ -46,12 +46,14 @@ the app actually reads at startup.
 Report each; none is fatal, but say what is lost:
 
 ```sh
-gh auth status                                                    # Phase 9: push + PR
+gh repo view                                                      # Phase 9: push + PR (auth AND a GitHub remote)
 ls -d ~/.claude/plugins/cache/openai-codex/codex/*/ 2>/dev/null   # Phase 6: adversarial review
 ```
 
-- **No `gh` / not authenticated** → the loop stops at a commit and hands the user the
-  push and PR commands. Recommend `gh auth login`.
+- **No `gh`, not authenticated, or no GitHub remote** → the loop stops at a commit and
+  hands the user the push and PR commands. `gh auth status` is not enough on its own: it
+  succeeds in a repo that has no GitHub remote, where `gh pr create` still fails.
+  Recommend `gh auth login`, or adding the remote.
 - **No codex** → Phase 6 falls back to an in-family reviewer, which shares training and
   blind spots with the implementers and is materially weaker. Recommend
   `/plugin install codex@openai-codex`. If codex *is* present, also recommend running

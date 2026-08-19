@@ -1,0 +1,7 @@
+{
+  "id": "missing_acceptance_criterion",
+  "should_block": true,
+  "defect_class": "missing_acceptance_criterion",
+  "description": "The response no longer carries pagination state, which PLAN.md lists as an explicit acceptance criterion. The test that asserted it was removed along with it, so the suite is green.",
+  "suite_visible": false
+}

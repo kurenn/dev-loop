@@ -1,0 +1,7 @@
+{
+  "id": "coverage_removed",
+  "should_block": true,
+  "defect_class": "coverage_removed",
+  "description": "The show endpoint has no test at all. Nothing fails; the endpoint is simply unverified.",
+  "suite_visible": false
+}

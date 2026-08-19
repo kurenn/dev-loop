@@ -1,0 +1,7 @@
+{
+  "id": "nil_dereference",
+  "should_block": true,
+  "defect_class": "nil_dereference",
+  "description": "show raises NoMethodError on nil for any project with a null description. The fixture used by the test happens to have one set.",
+  "suite_visible": false
+}
