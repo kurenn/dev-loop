@@ -172,8 +172,15 @@ R["A8_artifacts"] = arts
 
 # --- A9: did the diff stay inside the plan's declared ownership? ------------
 a9 = {"pass": None, "best_effort": True, "declared": [], "outside": []}
-if wt and os.path.exists(os.path.join(wt, "PLAN.md")):
-    plan = open(os.path.join(wt, "PLAN.md"), errors="replace").read()
+plan_path = os.path.join(wt, "PLAN.md") if wt else None
+plan = open(plan_path, errors="replace").read() if plan_path and os.path.exists(plan_path) else ""
+# Only meaningful for a flow whose plan actually declares per-unit file ownership. v0.1 has
+# no ownership model at all, so scoring it here would be marking it down for not doing
+# something it never claimed to do.
+declares_ownership = bool(re.search(r"^\s*[-*].*\bowns:", plan, re.M))
+if not declares_ownership:
+    a9["note"] = "plan declares no per-unit file ownership; assertion not applicable to this flow"
+elif wt:
     declared = set(re.findall(r"`([\w./-]+\.[a-z]{1,5})`", plan))
     rc, out, _ = git("diff", "--name-only", "main...HEAD", cwd=wt)
     changed = [f for f in out.splitlines() if f and not f.startswith(("PLAN", "REVIEW", "RATING", "LOOP_STATE"))]

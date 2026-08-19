@@ -68,8 +68,12 @@ cp "$PRISTINE/config/master.key" "$APP/config/master.key"
 # --- the run ---------------------------------------------------------------
 # v0.2 defaults to stopping for plan approval, which cannot happen headless, so the
 # autonomous flag is passed for comparability. Recorded in meta.json; see bench/README.md.
+# Any v0.2+ arm defaults to stopping for plan approval, which cannot happen headless.
+# Match the family, not the exact string: v0.2.1 needs --auto just as much as v0.2 does.
 PROMPT="/dev-loop $(cat "$TASKFILE")"
-if [ "$FLOW" = "v0.2" ]; then PROMPT="/dev-loop --auto $(cat "$TASKFILE")"; fi
+case "$FLOW" in
+  v0.2*) PROMPT="/dev-loop --auto $(cat "$TASKFILE")" ;;
+esac
 
 START=$(date +%s)
 ( cd "$APP" && timeout "$TIMEOUT" claude \
@@ -88,7 +92,7 @@ import json, sys
 d, flow, task, idx, model, rc, secs = sys.argv[1:8]
 json.dump({"flow": flow, "task": task, "idx": int(idx), "model": model,
            "exit_code": int(rc), "wall_seconds": int(secs),
-           "autonomous_flag": flow == "v0.2",
+           "autonomous_flag": flow.startswith("v0.2"),
            "note": "v0.2 run with --auto; its plan checkpoint cannot be exercised headless"},
           open(f"{d}/meta.json", "w"), indent=2)
 PY
