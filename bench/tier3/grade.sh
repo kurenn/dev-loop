@@ -6,12 +6,13 @@
 set -uo pipefail
 BENCH="$(cd "$(dirname "$0")/.." && pwd)"
 REPS="${BENCH_REPS:-4}"; MODEL="${BENCH_MODEL:-opus}"
-OUT="$BENCH/results/tier3/blind"; mkdir -p "$OUT"
+ARM1="${1:-v0.1}"; ARM2="${2:-v0.2.2}"
+OUT="$BENCH/results/tier3/blind-$ARM1-vs-$ARM2"; rm -rf "$OUT"; mkdir -p "$OUT"
 SANDBOX="$(mktemp -d)"; trap 'rm -rf "$SANDBOX"' EXIT
 TASK=$(cat "$BENCH/tier1/tasks/t04-api-v1.md")
 
 for REP in $(seq 1 "$REPS"); do
-  if [ $((REP % 2)) -eq 1 ]; then A=v0.1; B=v0.2.2; else A=v0.2.2; B=v0.1; fi
+  if [ $((REP % 2)) -eq 1 ]; then A=$ARM1; B=$ARM2; else A=$ARM2; B=$ARM1; fi
   P="$SANDBOX/prompt-$REP.txt"
   {
     echo "You are grading two independent implementations of the same task. You do not know"
