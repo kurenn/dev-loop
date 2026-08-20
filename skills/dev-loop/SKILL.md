@@ -260,6 +260,11 @@ Objective checks, run in the worktree, **before** spending anything on review:
 install/build · tests · lint · typecheck · security scan — whichever the profile defines.
 
 - Compare against the Phase 2 baseline. New failures block; pre-existing ones don't.
+- **Coverage may not fall below the baseline.** If it has, the missing coverage is restored
+  before anything proceeds. This is a check, not a request, and it is what actually keeps
+  test rigour from being traded away against the disproportion rules in Phase 7 — the
+  ablation arm carrying this floor beat the arm carrying only a written caution on test
+  quality in both blind pairings.
 - Any check the profile doesn't define is **skipped and reported as skipped**.
 - If red: dispatch **sonnet** agents to repair, then re-run. This is repair, not a fix
   round — it does not consume the fix-round cap, but cap it at 3 attempts and stop if the

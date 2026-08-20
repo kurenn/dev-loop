@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.6
+
+- **Coverage floor moved into the mechanical gate.** 0.2.5 protected test rigour with a
+  written caution not to weaken a test. An ablation arm that instead refused to let coverage
+  fall below baseline beat 0.2.4 on test quality in both blind pairings (+1.25, +0.75),
+  reproducing the pattern that has held all through this benchmark: guarantees expressed as
+  checks hold, guarantees expressed as adjectives trade against each other. The written
+  caution stays, but the check is what enforces it.
+
 ## 0.2.5
 
 - **Disproportion findings may no longer be satisfied by weakening a test.** 0.2.4 told fix
