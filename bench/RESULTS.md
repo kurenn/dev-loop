@@ -193,3 +193,66 @@ preference for concision, which is why every claim above was verified against th
 rather than taken on the grader's word. The hidden suite tests the specification; it
 cannot see maintainability, which is exactly what 3b is for and exactly where a grader is
 least reliable.
+
+
+---
+
+## Tier 3, round 2 — after the fixes (v0.2.4)
+
+Two v0.2.4 runs and a second v0.1 run on t04, then the same hidden suite and blind grading
+across **two independent implementation pairs**, position alternated, 8 grader calls.
+
+### Mechanical
+
+v0.2.4 scored **8/8 on both runs**, including A9, which was 0/4 before the post-wave
+ownership check. Cost fell from $15.99 (v0.2.2, n=1) to **$11.44 ± 0.21** (n=2).
+
+### Size
+
+| arm | app lines | test lines | comment density |
+|---|---|---|---|
+| v0.1 #1 / #2 | 99 / 133 | 252 / 296 | 15% / 26% |
+| v0.2.2 #1 | 144 | 711 | 45% |
+| **v0.2.4 #1 / #2** | **44 / 39** | 155 / 203 | 2% / 0% |
+
+v0.2.4 became the smallest implementation of any arm without becoming degenerate: it
+dropped a base controller and a pagination concern that each had exactly one caller,
+inlined the logic into a 37-line controller, and kept one comment — explaining a param
+coercion that is genuinely non-obvious. All four t04 branches pass the hidden suite 8/8.
+
+### Blind grading, both pairs combined
+
+| arm | fitness | test_quality | simplicity | clarity |
+|---|---|---|---|---|
+| v0.1 | **8.62** | **8.12** | 5.62 | 7.50 |
+| v0.2.4 | 7.88 | 7.25 | **8.88** | **8.38** |
+| delta | −0.75 | −0.88 | **+3.25** | **+0.88** |
+
+**Preference: v0.2.4 5, v0.1 3** — against **v0.2.2's 0–4** on the same task.
+
+At n=8 a 5–3 split is not a win, it is parity. The dimension scores are the real signal:
+the disproportion rule moved simplicity by +3.25 and cost 0.88 of test quality.
+
+### The regression the fix caused
+
+Graders named it precisely: v0.2.4 lost the duplicate-name test pinning the `:id`
+tiebreaker, and weakened a page-cap assertion to a bound its fixture could not exercise.
+0.2.4 told fix rounds "removing code is a legitimate fix" and that was applied to
+assertions. Addressed in 0.2.5 — coverage may only fall when the code it covered is gone.
+**Not yet re-measured.**
+
+### Where this leaves the comparison
+
+After four rounds of fixes, against v0.1 on t04:
+
+- **Mechanical**: v0.2.x clearly ahead — worktree provisioning 2/2 vs 1/5, ownership 2/2
+  vs n/a, gate ordering 2/2 vs 1/2.
+- **Judged quality**: parity. Better simplicity and clarity, slightly worse fitness and
+  test quality.
+- **Functional**: identical. Every branch of both arms passes the hidden suite.
+- **Cost**: v0.2.4 $11.44 vs v0.1 $6.22 — still **1.84x**.
+
+The 2x buys process guarantees, not better code. Whether that is worth it depends on
+whether the guarantees matter for the work at hand: on a repo where a worktree cannot boot
+without copied secrets, or where parallel agents genuinely collide, they do. On a small
+single-agent change they do not.
