@@ -1,17 +1,20 @@
 diff --git a/app/controllers/api/v1/base_controller.rb b/app/controllers/api/v1/base_controller.rb
 new file mode 100644
-index 0000000..65c523c
+index 0000000..153afd0
 --- /dev/null
 +++ b/app/controllers/api/v1/base_controller.rb
 @@ -0,0 +1,66 @@
 +module Api
 +  module V1
-+    # Base class for the /api/v1 namespace. Inherits ActionController::API
-+    # directly (NOT ApplicationController) so this namespace stays decoupled
-+    # from HTML-era, browser-facing concerns (allow_browser gating,
-+    # importmap staleness, cookies, CSRF, view rendering).
++    # Base controller for the versioned JSON API. Deliberately inherits from
++    # ActionController::API, not ApplicationController: ActionController::API
++    # omits view rendering, cookies/session/flash, and the browser/importmap
++    # -oriented ETag behaviour (`stale_when_importmap_changes`) that
++    # ApplicationController layers on for HTML responses. It also sidesteps
++    # `allow_browser versions: :modern`, which would 406 a recognized-but
++    # -outdated browser client (e.g. an old Chrome/Safari) hitting this API
++    # -- not something a JSON API should be filtering on.
 +    class BaseController < ActionController::API
-+      DEFAULT_PAGE = 1
 +      DEFAULT_PER_PAGE = 25
 +      MAX_PER_PAGE = 100
 +
@@ -19,60 +22,57 @@ index 0000000..65c523c
 +
 +      private
 +
-+      # Paginates an ActiveRecord::Relation with defensive, never-raising
-+      # coercion of caller-supplied page/per_page params, and short-circuits
-+      # to an empty result (rather than issuing a huge-OFFSET query) when the
-+      # requested page is beyond the last page.
++      # Paginates an ActiveRecord relation. Returns the (possibly empty)
++      # slice of records plus a pagination metadata hash. All clamping /
++      # coercion arithmetic lives here, in one place.
 +      #
-+      # Returns [records, pagination_hash].
++      # When the requested page is beyond the last page, the offset query
++      # is skipped entirely (via `.none`) rather than clamping the page
++      # down — this both echoes the truthful requested page back to the
++      # client and structurally prevents an absurd `page` value from
++      # reaching SQL as an out-of-range OFFSET.
 +      def paginate(scope)
-+        page = safe_page
-+        per_page = safe_per_page
++        page = coerce_positive_integer(params[:page], default: 1)
++        per_page = coerce_positive_integer(params[:per_page], default: DEFAULT_PER_PAGE)
++        per_page = MAX_PER_PAGE if per_page > MAX_PER_PAGE
 +
 +        total_count = scope.count
 +        total_pages = total_count.zero? ? 0 : (total_count.to_f / per_page).ceil
 +
-+        records = if total_count.zero? || page > total_pages
-+          scope.none
-+        else
-+          scope.limit(per_page).offset((page - 1) * per_page)
-+        end
++        records = page > total_pages ? scope.none : scope.offset((page - 1) * per_page).limit(per_page)
 +
 +        pagination = {
 +          page: page,
 +          per_page: per_page,
-+          total_count: total_count,
-+          total_pages: total_pages
++          total_pages: total_pages,
++          total_count: total_count
 +        }
 +
 +        [ records, pagination ]
 +      end
 +
-+      # params[:page] is not guaranteed to be a String (e.g. page[]=1 makes it
-+      # an Array, page[x]=1 makes it Parameters/Hash). Coerce defensively via
-+      # #to_s so any shape degrades to the default instead of raising.
-+      def safe_page
-+        page = params[:page].to_s.to_i
-+        page < 1 ? DEFAULT_PAGE : page
++      # Coerces an untrusted param into a positive integer, never raising.
++      # `params[:per_page]` can arrive as an Array or Hash (e.g.
++      # `?per_page[]=5`), so we go through a string form and validate with
++      # a strict integer match before converting, rather than calling
++      # `.to_i` directly on the raw value.
++      def coerce_positive_integer(value, default:)
++        string = value.to_s
++        return default unless string.match?(/\A\d+\z/)
++
++        integer = string.to_i
++        integer.positive? ? integer : default
 +      end
 +
-+      def safe_per_page
-+        per_page = params[:per_page].to_s.to_i
-+        return DEFAULT_PER_PAGE if per_page < 1
-+        [ per_page, MAX_PER_PAGE ].min
-+      end
-+
-+      def render_not_found(exception)
-+        resource = exception.model || "Record"
-+        render json: { error: { code: "not_found", message: "#{resource} not found" } },
-+               status: :not_found
++      def render_not_found
++        render json: { error: { code: "not_found", message: "Resource not found" } }, status: :not_found
 +      end
 +    end
 +  end
 +end
 diff --git a/app/controllers/api/v1/projects_controller.rb b/app/controllers/api/v1/projects_controller.rb
 new file mode 100644
-index 0000000..788b80c
+index 0000000..a7e2b90
 --- /dev/null
 +++ b/app/controllers/api/v1/projects_controller.rb
 @@ -0,0 +1,20 @@
@@ -83,7 +83,7 @@ index 0000000..788b80c
 +        records, pagination = paginate(Project.active.order(:name, :id))
 +
 +        render json: {
-+          data: records.as_json(only: %i[id name archived]),
++          data: records.map { |project| ProjectSerializer.new(project).list },
 +          pagination: pagination
 +        }
 +      end
@@ -91,13 +91,47 @@ index 0000000..788b80c
 +      def show
 +        project = Project.find(params[:id])
 +
-+        render json: { data: project.as_json(only: %i[id name description archived]) }
++        render json: { data: ProjectSerializer.new(project).detail }
++      end
++    end
++  end
++end
+diff --git a/app/serializers/api/v1/project_serializer.rb b/app/serializers/api/v1/project_serializer.rb
+new file mode 100644
+index 0000000..4760217
+--- /dev/null
++++ b/app/serializers/api/v1/project_serializer.rb
+@@ -0,0 +1,28 @@
++module Api
++  module V1
++    # Holds both response projections for Project so the field contract
++    # lives in one place.
++    class ProjectSerializer
++      LIST_ATTRIBUTES = %i[id name archived].freeze
++      DETAIL_ATTRIBUTES = %i[id name description archived created_at updated_at].freeze
++
++      def initialize(project)
++        @project = project
++      end
++
++      # Lean projection for the index action. Deliberately excludes
++      # `description` — the client is on a slow connection and does not
++      # need it in a list.
++      def list
++        @project.as_json(only: LIST_ATTRIBUTES)
++      end
++
++      # Full projection for the show action, including timestamps (ISO8601
++      # via ActiveSupport's default JSON time format) for local caching /
++      # sync on the client.
++      def detail
++        @project.as_json(only: DETAIL_ATTRIBUTES)
 +      end
 +    end
 +  end
 +end
 diff --git a/config/routes.rb b/config/routes.rb
-index 6080898..1b9faa6 100644
+index 6080898..3828d36 100644
 --- a/config/routes.rb
 +++ b/config/routes.rb
 @@ -1,4 +1,10 @@
@@ -107,23 +141,29 @@ index 6080898..1b9faa6 100644
 +
 +  namespace :api, defaults: { format: :json } do
 +    namespace :v1 do
-+      resources :projects, only: [ :index, :show ]
++      resources :projects, only: %i[index show]
 +    end
 +  end
  end
-diff --git a/db/migrate/20260819214156_add_archived_name_index_to_projects.rb b/db/migrate/20260819214156_add_archived_name_index_to_projects.rb
+diff --git a/db/migrate/20260820153802_add_index_to_projects_archived_and_name.rb b/db/migrate/20260820153802_add_index_to_projects_archived_and_name.rb
 new file mode 100644
-index 0000000..9128490
+index 0000000..f856ea0
 --- /dev/null
-+++ b/db/migrate/20260819214156_add_archived_name_index_to_projects.rb
-@@ -0,0 +1,5 @@
-+class AddArchivedNameIndexToProjects < ActiveRecord::Migration[8.1]
++++ b/db/migrate/20260820153802_add_index_to_projects_archived_and_name.rb
+@@ -0,0 +1,11 @@
++class AddIndexToProjectsArchivedAndName < ActiveRecord::Migration[8.1]
 +  def change
-+    add_index :projects, [:archived, :name, :id]
++    # Covering index for the API list query:
++    #   WHERE archived = ? ORDER BY name, id LIMIT ? OFFSET ?
++    # plus the COUNT(*) for total_count. Column order matters: the equality
++    # predicate (archived) comes first, followed by the sort columns in sort
++    # order (name, id), so the query is served without a full table scan or
++    # filesort.
++    add_index :projects, [:archived, :name, :id], name: "index_projects_on_archived_and_name_and_id"
 +  end
 +end
 diff --git a/db/schema.rb b/db/schema.rb
-index 0239f29..29ecdf1 100644
+index 0239f29..09dff89 100644
 --- a/db/schema.rb
 +++ b/db/schema.rb
 @@ -10,13 +10,14 @@
@@ -131,7 +171,7 @@ index 0239f29..29ecdf1 100644
  # It's strongly recommended that you check this file into your version control system.
  
 -ActiveRecord::Schema[8.1].define(version: 2026_08_19_000513) do
-+ActiveRecord::Schema[8.1].define(version: 2026_08_19_214156) do
++ActiveRecord::Schema[8.1].define(version: 2026_08_20_153802) do
    create_table "projects", force: :cascade do |t|
      t.boolean "archived"
      t.datetime "created_at", null: false
@@ -144,259 +184,303 @@ index 0239f29..29ecdf1 100644
    create_table "tasks", force: :cascade do |t|
 diff --git a/test/controllers/api/v1/projects_controller_test.rb b/test/controllers/api/v1/projects_controller_test.rb
 new file mode 100644
-index 0000000..dee1f4b
+index 0000000..ef3f56c
 --- /dev/null
 +++ b/test/controllers/api/v1/projects_controller_test.rb
-@@ -0,0 +1,252 @@
+@@ -0,0 +1,296 @@
 +require "test_helper"
 +
-+module Api
-+  module V1
-+    class ProjectsControllerTest < ActionDispatch::IntegrationTest
-+      # --- index ---------------------------------------------------------
++class Api::V1::ProjectsControllerTest < ActionDispatch::IntegrationTest
++  # ---------------------------------------------------------------
++  # Helpers
++  # ---------------------------------------------------------------
 +
-+      test "index returns 200 with data and pagination keys present" do
-+        get api_v1_projects_url
-+        assert_response :success
-+        assert_equal "application/json", response.media_type
++  # tasks.project_id carries an FK to projects, so tasks must be
++  # cleared first or SQLite raises SQLite3::ConstraintException.
++  def reset_projects!
++    Task.delete_all
++    Project.delete_all
++  end
 +
-+        json = JSON.parse(response.body)
-+        assert json.key?("data"), "expected response body to have a \"data\" key"
-+        assert json.key?("pagination"), "expected response body to have a \"pagination\" key"
-+      end
-+
-+      test "index excludes archived projects" do
-+        Project.create!(name: "IndexVisibleTest", archived: false)
-+        Project.create!(name: "IndexHiddenTest", archived: true)
-+
-+        get api_v1_projects_url(per_page: 100)
-+        assert_response :success
-+
-+        names = JSON.parse(response.body)["data"].map { |p| p["name"] }
-+        assert_includes names, "IndexVisibleTest"
-+        assert_not_includes names, "IndexHiddenTest"
-+        assert_not_includes names, "Zulu"
-+      end
-+
-+      test "index defaults to page 1 and per_page 25" do
-+        get api_v1_projects_url
-+        assert_response :success
-+
-+        pagination = JSON.parse(response.body)["pagination"]
-+        assert_equal 1, pagination["page"]
-+        assert_equal 25, pagination["per_page"]
-+      end
-+
-+      test "index honours a valid per_page below the cap" do
-+        5.times { |i| Project.create!(name: "PerPageTest #{i}", archived: false) }
-+
-+        get api_v1_projects_url(per_page: 5)
-+        assert_response :success
-+
-+        json = JSON.parse(response.body)
-+        assert_equal 5, json["data"].length
-+        assert_equal 5, json["pagination"]["per_page"]
-+      end
-+
-+      test "index clamps per_page above the cap to 100" do
-+        101.times { |i| Project.create!(name: "CapTest #{i}", archived: false) }
-+
-+        get api_v1_projects_url(per_page: 1000)
-+        assert_response :success
-+
-+        json = JSON.parse(response.body)
-+        assert_equal 100, json["data"].length
-+        assert_equal 100, json["pagination"]["per_page"]
-+      end
-+
-+      test "index coerces junk per_page to the default of 25" do
-+        ["abc", "0", "-5"].each do |bad_per_page|
-+          get api_v1_projects_url(per_page: bad_per_page)
-+          assert_response :success
-+
-+          pagination = JSON.parse(response.body)["pagination"]
-+          assert_equal 25, pagination["per_page"],
-+            "per_page=#{bad_per_page.inspect} should coerce to the default of 25"
-+        end
-+      end
-+
-+      test "index coerces junk or negative page to page 1" do
-+        ["abc", "0", "-3"].each do |bad_page|
-+          get api_v1_projects_url(page: bad_page)
-+          assert_response :success
-+
-+          pagination = JSON.parse(response.body)["pagination"]
-+          assert_equal 1, pagination["page"],
-+            "page=#{bad_page.inspect} should coerce to page 1"
-+        end
-+      end
-+
-+      test "index tolerates non-scalar per_page shapes without raising" do
-+        get api_v1_projects_url, params: { per_page: [ 1 ] }
-+        assert_response :success
-+        assert_equal 25, JSON.parse(response.body)["pagination"]["per_page"],
-+          "an Array-shaped per_page (per_page[]=1) should degrade to the default, not 500"
-+
-+        get api_v1_projects_url, params: { per_page: { x: 1 } }
-+        assert_response :success
-+        assert_equal 25, JSON.parse(response.body)["pagination"]["per_page"],
-+          "a Hash-shaped per_page (per_page[x]=1) should degrade to the default, not 500"
-+      end
-+
-+      test "index tolerates non-scalar page shapes without raising" do
-+        get api_v1_projects_url, params: { page: [ 1 ] }
-+        assert_response :success
-+        assert_equal 1, JSON.parse(response.body)["pagination"]["page"],
-+          "an Array-shaped page (page[]=1) should degrade to page 1, not 500"
-+
-+        get api_v1_projects_url, params: { page: { x: 1 } }
-+        assert_response :success
-+        assert_equal 1, JSON.parse(response.body)["pagination"]["page"],
-+          "a Hash-shaped page (page[x]=1) should degrade to page 1, not 500"
-+      end
-+
-+      test "index tolerates a bignum page without raising" do
-+        get api_v1_projects_url, params: { page: "9" * 30 }
-+        assert_response :success
-+
-+        json = JSON.parse(response.body)
-+        assert_equal [], json["data"]
-+      end
-+
-+      test "index reports accurate total_count and total_pages" do
-+        7.times { |i| Project.create!(name: "TotalCountTest #{i}", archived: false) }
-+        expected_total = Project.active.count
-+
-+        get api_v1_projects_url(per_page: 3)
-+        assert_response :success
-+
-+        pagination = JSON.parse(response.body)["pagination"]
-+        assert_equal expected_total, pagination["total_count"]
-+        assert_equal (expected_total / 3.0).ceil, pagination["total_pages"]
-+      end
-+
-+      test "index page past the end returns 200 with empty data and accurate pagination" do
-+        2.times { |i| Project.create!(name: "PastEndTest #{i}", archived: false) }
-+        expected_total = Project.active.count
-+
-+        get api_v1_projects_url(per_page: 2, page: 5)
-+        assert_response :success
-+
-+        json = JSON.parse(response.body)
-+        assert_equal [], json["data"]
-+        assert_equal 5, json["pagination"]["page"]
-+        assert_equal 2, json["pagination"]["per_page"]
-+        assert_equal expected_total, json["pagination"]["total_count"]
-+        assert_equal (expected_total / 2.0).ceil, json["pagination"]["total_pages"]
-+      end
-+
-+      test "index paginates with stable ordering so every record appears exactly once" do
-+        created_ids = 6.times.map { Project.create!(name: "Duplicate", archived: false).id }
-+
-+        get api_v1_projects_url(per_page: 2)
-+        assert_response :success
-+        first_page = JSON.parse(response.body)
-+        total_pages = first_page["pagination"]["total_pages"]
-+        total_count = first_page["pagination"]["total_count"]
-+
-+        all_ids = first_page["data"].map { |p| p["id"] }
-+        (2..total_pages).each do |page|
-+          get api_v1_projects_url(per_page: 2, page: page)
-+          assert_response :success
-+          all_ids.concat(JSON.parse(response.body)["data"].map { |p| p["id"] })
-+        end
-+
-+        assert_equal total_count, all_ids.length,
-+          "walking every page should yield exactly total_count records"
-+        assert_equal all_ids.uniq.length, all_ids.length,
-+          "no id should be duplicated across pages"
-+
-+        created_ids.each do |id|
-+          assert_equal 1, all_ids.count(id),
-+            "id #{id} should appear exactly once across all pages, appeared #{all_ids.count(id)} times"
-+        end
-+      end
-+
-+      test "index orders by name then id" do
-+        seen = []
-+        probe = ->(*, payload) { seen << payload[:sql] if payload[:sql].include?('FROM "projects"') }
-+        ActiveSupport::Notifications.subscribed(probe, "sql.active_record") { get api_v1_projects_url }
-+
-+        assert seen.any? { |s| s.include?(%q(ORDER BY "projects"."name" ASC, "projects"."id" ASC)) },
-+          "index must order by name then id - without the id tiebreaker, LIMIT/OFFSET " \
-+          "paging can duplicate and skip records with duplicate names"
-+      end
-+
-+      test "index records expose exactly id, name, archived keys" do
-+        Project.create!(name: "KeySetTest", archived: false)
-+
-+        get api_v1_projects_url(per_page: 100)
-+        assert_response :success
-+
-+        record = JSON.parse(response.body)["data"].find { |p| p["name"] == "KeySetTest" }
-+        assert record, "expected the created project to be present in the response"
-+        assert_equal %w[archived id name], record.keys.sort
-+      end
-+
-+      # --- show ------------------------------------------------------------
-+
-+      test "show returns 200 with the project nested under data" do
-+        project = Project.create!(name: "ShowTest", description: "A project", archived: false)
-+
-+        get api_v1_project_url(project)
-+        assert_response :success
-+
-+        json = JSON.parse(response.body)
-+        assert json.key?("data"), "expected response body to have a \"data\" key"
-+        assert_equal project.id, json["data"]["id"]
-+        assert_equal "ShowTest", json["data"]["name"]
-+      end
-+
-+      test "show record exposes exactly id, name, description, archived keys" do
-+        project = Project.create!(name: "ShowKeysTest", description: "A project", archived: false)
-+
-+        get api_v1_project_url(project)
-+        assert_response :success
-+
-+        data = JSON.parse(response.body)["data"]
-+        assert_equal %w[archived description id name], data.keys.sort
-+      end
-+
-+      test "show returns 200 for an archived project" do
-+        project = Project.create!(name: "ArchivedShowTest", archived: true)
-+
-+        get api_v1_project_url(project)
-+        assert_response :success
-+
-+        data = JSON.parse(response.body)["data"]
-+        assert_equal true, data["archived"]
-+      end
-+
-+      test "show with an unknown id returns 404 with a JSON error envelope" do
-+        project = Project.create!(name: "SoonToBeDeleted", archived: false)
-+        missing_id = project.id
-+        project.destroy!
-+
-+        get api_v1_project_url(id: missing_id)
-+        assert_response :not_found
-+        assert_equal "application/json", response.media_type,
-+          "expected a JSON error response, never HTML"
-+
-+        json = JSON.parse(response.body)
-+        assert json.key?("error"), "expected an \"error\" key in the response body"
-+        assert_equal "not_found", json["error"]["code"]
-+        assert json["error"]["message"].present?
-+      end
-+
-+      test "show with a bignum id returns 404 without raising" do
-+        get "/api/v1/projects/#{"9" * 30}"
-+        assert_response :not_found
-+        assert_equal "application/json", response.media_type,
-+          "expected a JSON error response, never HTML or a 500"
-+
-+        json = JSON.parse(response.body)
-+        assert_equal "not_found", json["error"]["code"]
-+      end
++  def create_projects(count, prefix: "Project", archived: false)
++    count.times.map do |i|
++      Project.create!(name: "#{prefix} #{i.to_s.rjust(4, '0')}", archived: archived)
 +    end
++  end
++
++  # ---------------------------------------------------------------
++  # List — shape and envelope
++  # ---------------------------------------------------------------
++
++  test "1: index returns 200 with data and pagination keys, data is an Array" do
++    get api_v1_projects_url
++    assert_response :success
++    body = JSON.parse(response.body)
++    assert body.key?("data")
++    assert body.key?("pagination")
++    assert_kind_of Array, body["data"]
++  end
++
++  test "2: index data entries expose exactly id, name, archived - no description leakage" do
++    get api_v1_projects_url
++    assert_response :success
++    body = JSON.parse(response.body)
++    entry = body["data"].first
++    assert_not_nil entry
++    assert_equal %w[archived id name].sort, entry.keys.sort
++    assert_not entry.key?("description")
++  end
++
++  test "3: archived projects are excluded from index data" do
++    get api_v1_projects_url
++    assert_response :success
++    body = JSON.parse(response.body)
++    names = body["data"].map { |p| p["name"] }
++    assert_includes names, "Alpha"
++    assert_not_includes names, "Zulu"
++  end
++
++  # ---------------------------------------------------------------
++  # List — pagination behaviour
++  # ---------------------------------------------------------------
++
++  test "4: defaults with no params - page 1, per_page 25" do
++    get api_v1_projects_url
++    assert_response :success
++    pagination = JSON.parse(response.body)["pagination"]
++    assert_equal 1, pagination["page"]
++    assert_equal 25, pagination["per_page"]
++  end
++
++  test "5: per_page=10 honoured, data length is 10" do
++    reset_projects!
++    create_projects(30)
++
++    get api_v1_projects_url, params: { per_page: 10 }
++    assert_response :success
++    body = JSON.parse(response.body)
++    assert_equal 10, body["data"].length
++    assert_equal 10, body["pagination"]["per_page"]
++  end
++
++  test "6: per_page=5000 clamped to 100, data length at most 100" do
++    reset_projects!
++    create_projects(150)
++
++    get api_v1_projects_url, params: { per_page: 5000 }
++    assert_response :success
++    body = JSON.parse(response.body)
++    assert_equal 100, body["pagination"]["per_page"]
++    assert_operator body["data"].length, :<=, 100
++  end
++
++  test "7: per_page boundary - 101 clamps to 100, 100 is allowed as-is" do
++    reset_projects!
++    create_projects(150)
++
++    get api_v1_projects_url, params: { per_page: 101 }
++    assert_response :success
++    assert_equal 100, JSON.parse(response.body)["pagination"]["per_page"]
++
++    get api_v1_projects_url, params: { per_page: 100 }
++    assert_response :success
++    assert_equal 100, JSON.parse(response.body)["pagination"]["per_page"]
++  end
++
++  test "8: per_page falls back to 25 for 0, negative, non-integer, and blank" do
++    reset_projects!
++    create_projects(30)
++
++    [ 0, -5, "abc", "" ].each do |value|
++      get api_v1_projects_url, params: { per_page: value }
++      assert_response :success
++      pagination = JSON.parse(response.body)["pagination"]
++      assert_equal 25, pagination["per_page"], "expected per_page=#{value.inspect} to fall back to 25"
++    end
++  end
++
++  test "9: per_page as an Array param returns 200, not 500" do
++    get "/api/v1/projects?per_page[]=5"
++    assert_response :success
++    body = JSON.parse(response.body)
++    assert_equal 25, body["pagination"]["per_page"]
++  end
++
++  test "10: page=2 returns the next slice - page 1 and page 2 ids are disjoint" do
++    reset_projects!
++    create_projects(30)
++
++    get api_v1_projects_url, params: { page: 1, per_page: 10 }
++    assert_response :success
++    page1_ids = JSON.parse(response.body)["data"].map { |p| p["id"] }
++
++    get api_v1_projects_url, params: { page: 2, per_page: 10 }
++    assert_response :success
++    page2_ids = JSON.parse(response.body)["data"].map { |p| p["id"] }
++
++    assert_equal 10, page1_ids.length
++    assert_equal 10, page2_ids.length
++    assert_empty(page1_ids & page2_ids)
++  end
++
++  test "11: total_count and total_pages are arithmetically correct for a non-exact final page" do
++    reset_projects!
++    create_projects(23)
++
++    get api_v1_projects_url, params: { per_page: 10 }
++    assert_response :success
++    pagination = JSON.parse(response.body)["pagination"]
++    assert_equal 23, pagination["total_count"]
++    assert_equal 3, pagination["total_pages"]
++
++    get api_v1_projects_url, params: { page: 3, per_page: 10 }
++    assert_response :success
++    body = JSON.parse(response.body)
++    assert_equal 3, body["data"].length
++    assert_equal 23, body["pagination"]["total_count"]
++    assert_equal 3, body["pagination"]["total_pages"]
++  end
++
++  test "12: ordering is stable across a page boundary when several projects share a name" do
++    reset_projects!
++
++    # Boundary sits between page 1 (per_page 5) and page 2. Several
++    # projects share the exact same name to prove the id tiebreaker.
++    duplicate_ids = 6.times.map do
++      Project.create!(name: "Duplicate", archived: false).id
++    end
++    other_ids = 4.times.map do |i|
++      Project.create!(name: "Solo #{i}", archived: false).id
++    end
++
++    per_page = 5
++    total = duplicate_ids.length + other_ids.length
++    total_pages = (total.to_f / per_page).ceil
++
++    collected_ids = []
++    (1..total_pages).each do |page|
++      get api_v1_projects_url, params: { page: page, per_page: per_page }
++      assert_response :success
++      body = JSON.parse(response.body)
++      collected_ids.concat(body["data"].map { |p| p["id"] })
++    end
++
++    # Independently compute the documented contract -- order by (name, id)
++    # -- in plain Ruby, rather than re-deriving it from the same query the
++    # controller runs. This is an ORDERED comparison, not a set comparison:
++    # it pins the exact sequence, so a regression that drops the `:id`
++    # tiebreaker or reorders by something else (e.g. created_at) is caught.
++    #
++    # Honesty check: on SQLite, the (archived, name, id) covering index
++    # already enumerates rows in (name, id) order, so `order(:name)` alone
++    # might coincidentally satisfy this today even without `:id` in the
++    # ORDER BY. This test still pins the documented contract and will catch
++    # a genuine ordering regression (different sort column, index change,
++    # or a database where the coincidence doesn't hold).
++    expected_order = Project.active.to_a.sort_by { |p| [ p.name.to_s, p.id ] }.map(&:id)
++    assert_equal expected_order, collected_ids
++    assert_equal collected_ids.uniq.length, collected_ids.length, "expected no duplicate ids across pages"
++  end
++
++  test "13: page beyond last returns 200 with empty data and truthful pagination" do
++    reset_projects!
++    create_projects(5)
++
++    get api_v1_projects_url, params: { page: 999, per_page: 10 }
++    assert_response :success
++    body = JSON.parse(response.body)
++    assert_equal [], body["data"]
++    assert_equal 999, body["pagination"]["page"]
++    assert_equal 5, body["pagination"]["total_count"]
++    assert_equal 1, body["pagination"]["total_pages"]
++  end
++
++  test "14: empty result set - data empty, total_count 0, total_pages 0" do
++    reset_projects!
++
++    get api_v1_projects_url
++    assert_response :success
++    body = JSON.parse(response.body)
++    assert_equal [], body["data"]
++    assert_equal 0, body["pagination"]["total_count"]
++    assert_equal 0, body["pagination"]["total_pages"]
++  end
++
++  # ---------------------------------------------------------------
++  # Show
++  # ---------------------------------------------------------------
++
++  test "15: show returns id, name, description, archived, created_at, updated_at" do
++    get api_v1_project_url(projects(:alpha))
++    assert_response :success
++    data = JSON.parse(response.body)["data"]
++    assert_equal %w[archived created_at description id name updated_at].sort, data.keys.sort
++    assert_equal "Alpha", data["name"]
++    assert_equal "First project", data["description"]
++    assert_equal false, data["archived"]
++  end
++
++  test "16: an archived project is retrievable by id via show" do
++    get api_v1_project_url(projects(:zulu))
++    assert_response :success
++    data = JSON.parse(response.body)["data"]
++    assert_equal "Zulu", data["name"]
++    assert_equal true, data["archived"]
++  end
++
++  test "17: unknown id returns 404 with a JSON error body" do
++    get api_v1_project_url(id: 999999999)
++    assert_response :not_found
++    assert_equal "application/json", response.media_type
++    body = JSON.parse(response.body)
++    assert body["error"].present?
++  end
++
++  # ---------------------------------------------------------------
++  # Namespace-level regression guards
++  # ---------------------------------------------------------------
++
++  test "18: non-browser User-Agent gets 200, not 406" do
++    get api_v1_projects_url, headers: { "User-Agent" => "MobileApp/1.0 (okhttp)" }
++    assert_response :success
++
++    # okhttp/absent UAs are never blocked by allow_browser (they aren't a
++    # "version-guarded" browser at all -- see ActionController::AllowBrowser),
++    # so the assertions above pass regardless of whether this controller
++    # inherits from ActionController::API or ApplicationController. They
++    # cannot, by themselves, prove this namespace is exempt from the guard.
++    #
++    # Chrome 40 IS version-guarded (allow_browser checks chrome/safari/
++    # firefox/opera/ie) and sits below the `versions: :modern` minimum
++    # (chrome: 120), so ApplicationController#allow_browser genuinely
++    # returns 406 for it. ActionController::API has no such filter, so this
++    # is the one User-Agent that actually discriminates "does this
++    # controller inherit ApplicationController's allow_browser" from
++    # "doesn't" -- without it, this test cannot fail.
++    get api_v1_projects_url, headers: {
++      "User-Agent" => "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/40.0.2214.115 Safari/537.36"
++    }
++    assert_response :success
++  end
++
++  test "18b: request with no User-Agent at all gets 200, not 406" do
++    get api_v1_projects_url, headers: { "User-Agent" => nil }
++    assert_response :success
++  end
++
++  test "19: legacy GET /projects still returns a bare array with no envelope" do
++    get projects_url
++    assert_response :success
++    body = JSON.parse(response.body)
++    assert_kind_of Array, body
++    assert_not body.is_a?(Hash)
++  end
++
++  test "20: legacy GET /projects/:id returns the original object shape" do
++    get project_url(projects(:alpha))
++    assert_response :success
++    body = JSON.parse(response.body)
++    assert_equal %w[archived description id name].sort, body.keys.sort
++    assert_equal "Alpha", body["name"]
 +  end
 +end

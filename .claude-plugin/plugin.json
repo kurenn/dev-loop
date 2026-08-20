@@ -1,6 +1,6 @@
 {
   "name": "dev-loop",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "The virtuous development loop, for any stack. A fable agent plans, a second fable agent critiques the plan, a parallel sonnet army executes it in dependency-ordered waves, mechanical checks gate the spend, an adversarial reviewer challenges the approach, a fresh opus rater judges it blind, sonnet agents fix until zero blocking findings remain, learnings are captured, and a PR is opened. Stops once for plan approval; runs fully autonomous only when asked.",
   "author": {
     "name": "Abraham Kuri",

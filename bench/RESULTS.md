@@ -38,10 +38,12 @@ as long. That difference is real, unlike the single-run figures reported earlier
 
 ### What holds
 
-- **v0.1 never provisions the worktree.** A3 failed 4/4 across both tasks — deterministic.
-  `git worktree add` takes tracked files only, so `config/master.key` is absent. The
-  benchmark app's suite does not read credentials so it stayed green; an app that does
-  would not boot.
+- **v0.1 usually fails to provision the worktree.** A3 failed 4 of 5 across both tasks
+  (t03 0/3, t04 1/2). An earlier version of this file called it deterministic on 4/4; a
+  later t04 run provisioned correctly, so it is a strong tendency, not a certainty.
+  `git worktree add` takes tracked files only, so `config/master.key` is absent unless the
+  loop copies it. The benchmark app's suite does not read credentials so it stayed green;
+  an app that does would not boot.
 - **v0.2.x keeps the main checkout clean** — 6/6. So does v0.1, 4/4.
 - **v0.1 reviews on red intermittently.** A7 failed 1 of 3 on t03 and 1 of 1 on t04.
   v0.2.x passed 6/6: the mechanical gate is doing its job.

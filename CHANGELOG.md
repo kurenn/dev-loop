@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.5
+
+- **Disproportion findings may no longer be satisfied by weakening a test.** 0.2.4 told fix
+  rounds that removing code is a legitimate fix; graders found it had been applied to test
+  assertions, costing the `:id`-tiebreaker regression test and weakening a page-cap check to
+  a bound the fixture could not exercise. Blind test-quality scoring fell 8.12 to 7.25
+  against the arm without the rule. Coverage may now only fall when the code it covered is
+  gone, and a test counts as disproportionate only if it tests the framework, exactly
+  duplicates another, or asserts nothing.
+
 ## 0.2.4
 
 - **Disproportion is now a MAJOR rating finding.** Blind graders, shown two implementations

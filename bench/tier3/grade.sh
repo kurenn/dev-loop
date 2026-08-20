@@ -6,10 +6,17 @@
 set -uo pipefail
 BENCH="$(cd "$(dirname "$0")/.." && pwd)"
 REPS="${BENCH_REPS:-4}"; MODEL="${BENCH_MODEL:-opus}"
-ARM1="${1:-v0.1}"; ARM2="${2:-v0.2.2}"
-OUT="$BENCH/results/tier3/blind-$ARM1-vs-$ARM2"; rm -rf "$OUT"; mkdir -p "$OUT"
+ARM1="${1:-v0.1}"; ARM2="${2:-v0.2.2}"; TASKID="${3:-t04-api-v1}"; IDX="${4:-1}"
+OUT="$BENCH/results/tier3/blind-$ARM1-vs-$ARM2-$IDX"; rm -rf "$OUT"; mkdir -p "$OUT"
+# Regenerate diffs from the actual worktrees. Loop artifacts are excluded: a PLAN.md or
+# RATING-round file identifies the flow on sight and is not the work being judged.
+for ARM in "$ARM1" "$ARM2"; do
+  W=$(ls -d "$BENCH/results/tier1/$ARM/$TASKID-$IDX/app/.worktrees/"*/ 2>/dev/null | head -1)
+  [ -n "$W" ] || { echo "no worktree: $ARM $TASKID-$IDX"; exit 1; }
+  git -C "$W" diff main...HEAD -- . ':(exclude)*.md' > "$BENCH/tier3/blind/$ARM.diff"
+done
 SANDBOX="$(mktemp -d)"; trap 'rm -rf "$SANDBOX"' EXIT
-TASK=$(cat "$BENCH/tier1/tasks/t04-api-v1.md")
+TASK=$(cat "$BENCH/tier1/tasks/$TASKID.md")
 
 for REP in $(seq 1 "$REPS"); do
   if [ $((REP % 2)) -eq 1 ]; then A=$ARM1; B=$ARM2; else A=$ARM2; B=$ARM1; fi

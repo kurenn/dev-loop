@@ -328,7 +328,9 @@ Return exactly these sections:
      an error handler that cannot fire, a dual-form API where one form is unused, or
      commentary that restates the code. Blind graders preferred a 99-line implementation
      over a 144-line one for the same passing behaviour, scoring it 8.25 vs 3.75 on
-     simplicity, so this is not a stylistic aside.
+     simplicity, so this is not a stylistic aside. **This applies to implementation code.**
+     A test is disproportionate only if it tests the framework, exactly duplicates another
+     test, or asserts nothing — never merely because it is long or thorough.
    MINOR = style, naming, nits.
    For each: file:line, what is wrong, and the concrete fix. Judge each Phase 6
    adversarial challenge as real or not, with reasoning.
@@ -361,7 +363,12 @@ deliberate: an unanchored self-report clustered in the 7–9 band is not a contr
 - **Not met** → dispatch **sonnet** agents (brief contract preamble, ownership from the
   plan) to fix the BLOCKING findings first, then the MAJORs. A fix must be the smallest
   change that resolves the finding: fix rounds are where scaffolding accretes, because
-  adding code always looks like progress. Removing code is a legitimate fix. Then **re-run Phase 5**, and
+  adding code always looks like progress. Removing implementation code is a legitimate fix.
+  **Never satisfy a disproportion finding by weakening a test.** Dropping an assertion,
+  widening a bound, or deleting a case removes coverage, not complexity — measured, the
+  first build with disproportion enforced lost the assertion pinning an `:id` tiebreaker
+  and weakened a page-cap check to a bound its fixture could not exercise. Coverage may
+  only fall when the code it covered is gone. Then **re-run Phase 5**, and
   re-run Phase 7 as a **delta judgment**: give the new rater `RATING-round-N.md` plus the
   diff since the fix, and ask it to verify each prior finding was actually addressed and
   to flag anything the fix broke. Delta judgment is better calibrated and far cheaper
