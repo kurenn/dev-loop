@@ -41,6 +41,14 @@ baseline before it is re-judged.
 /plugin install dev-loop@kurenn
 ```
 
+### Or ask an agent
+
+Point Claude Code or Codex at **[AGENTS.md](AGENTS.md)**, or paste:
+
+> Install the dev-loop plugin from https://github.com/kurenn/dev-loop by following the
+> instructions in its AGENTS.md, then run the setup in this repository and tell me which
+> checks it could not verify.
+
 ## Use
 
 ```sh
