@@ -260,11 +260,6 @@ Objective checks, run in the worktree, **before** spending anything on review:
 install/build · tests · lint · typecheck · security scan — whichever the profile defines.
 
 - Compare against the Phase 2 baseline. New failures block; pre-existing ones don't.
-- **Coverage may not fall below the baseline.** If it has, the missing coverage is restored
-  before anything proceeds. This is a check, not a request, and it is what actually keeps
-  test rigour from being traded away against the disproportion rules in Phase 7 — the
-  ablation arm carrying this floor beat the arm carrying only a written caution on test
-  quality in both blind pairings.
 - Any check the profile doesn't define is **skipped and reported as skipped**.
 - If red: dispatch **sonnet** agents to repair, then re-run. This is repair, not a fix
   round — it does not consume the fix-round cap, but cap it at 3 attempts and stop if the
@@ -333,9 +328,7 @@ Return exactly these sections:
      an error handler that cannot fire, a dual-form API where one form is unused, or
      commentary that restates the code. Blind graders preferred a 99-line implementation
      over a 144-line one for the same passing behaviour, scoring it 8.25 vs 3.75 on
-     simplicity, so this is not a stylistic aside. **This applies to implementation code.**
-     A test is disproportionate only if it tests the framework, exactly duplicates another
-     test, or asserts nothing — never merely because it is long or thorough.
+     simplicity, so this is not a stylistic aside.
    MINOR = style, naming, nits.
    For each: file:line, what is wrong, and the concrete fix. Judge each Phase 6
    adversarial challenge as real or not, with reasoning.
@@ -368,12 +361,7 @@ deliberate: an unanchored self-report clustered in the 7–9 band is not a contr
 - **Not met** → dispatch **sonnet** agents (brief contract preamble, ownership from the
   plan) to fix the BLOCKING findings first, then the MAJORs. A fix must be the smallest
   change that resolves the finding: fix rounds are where scaffolding accretes, because
-  adding code always looks like progress. Removing implementation code is a legitimate fix.
-  **Never satisfy a disproportion finding by weakening a test.** Dropping an assertion,
-  widening a bound, or deleting a case removes coverage, not complexity — measured, the
-  first build with disproportion enforced lost the assertion pinning an `:id` tiebreaker
-  and weakened a page-cap check to a bound its fixture could not exercise. Coverage may
-  only fall when the code it covered is gone. Then **re-run Phase 5**, and
+  adding code always looks like progress. Removing code is a legitimate fix. Then **re-run Phase 5**, and
   re-run Phase 7 as a **delta judgment**: give the new rater `RATING-round-N.md` plus the
   diff since the fix, and ask it to verify each prior finding was actually addressed and
   to flag anything the fix broke. Delta judgment is better calibrated and far cheaper

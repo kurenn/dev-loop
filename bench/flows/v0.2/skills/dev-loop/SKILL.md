@@ -33,7 +33,7 @@ ROOT=$(git rev-parse --show-toplevel) || exit 1
 MAIN=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
 [ -n "$MAIN" ] || MAIN=$(git rev-parse --verify -q main >/dev/null && echo main || echo master)
 CODEX_DIR=$(ls -d ~/.claude/plugins/cache/openai-codex/codex/*/ 2>/dev/null | sort -V | tail -1)
-gh repo view >/dev/null 2>&1 && GH=ok || GH=unavailable   # auth AND a GitHub remote
+gh auth status >/dev/null 2>&1 && GH=ok || GH=unavailable
 echo "ROOT=$ROOT MAIN=$MAIN GH=$GH CODEX_DIR=${CODEX_DIR:-none}"
 ```
 
@@ -59,7 +59,7 @@ Record these; every later phase uses them. Then:
 | Local config to copy into the worktree | every gitignored file the app needs to boot (`.env*`, `config/master.key`, `*.local.*`) |
 | Checkpoints | plan approval after Phase 3; autonomous only on explicit request |
 | Critical paths | none |
-| Fix-round cap | from the Phase 1 tier (Light 1, Full 2) |
+| Fix-round cap | 2 |
 | Learnings file | `docs/dev-loop-learnings.md` |
 | Telemetry axes | correctness, simplicity, test coverage, clarity, performance, security |
 
@@ -71,7 +71,7 @@ Record these; every later phase uses them. Then:
 |---|---|---|
 | 1 Triage & frame | you | this session |
 | 2 Plan | one agent | **fable** |
-| 3 Critique → revise | one *fresh* critic; you apply its edits | **fable** |
+| 3 Critique → revise | a *fresh* critic, then the planner | **fable** |
 | 4 Execute | unit agents, parallel within a wave | **sonnet** |
 | 5 Mechanical gate | you (repairs by sonnet agents) | — |
 | 6 Adversarial review | Codex, else a fresh agent | external / **fable** |
@@ -115,20 +115,9 @@ main checkout.
 1. **Trivial?** A typo, a copy edit, a one-line config change, a comment, a single
    obviously-safe file. If yes: tell the user the loop is overkill, make the edit
    directly in the main checkout, and stop.
-2. **Size tier — a hard branch, not a hint.** Count the work units the change actually
-   needs (a unit is one agent's worth of work over a disjoint set of files). Then commit
-   to a tier and *apply its whole row*. Measured: a one-line bug fix that fell through to
-   Full spent 35 minutes and produced a 397-line plan.
-
-   | Tier | When | Plan cap | Phase 3 | Waves | Fix cap | Codex |
-   |---|---|---|---|---|---|---|
-   | **Light** | ≤ 2 units **and** an expected diff under ~150 lines | 120 lines | one critic call | 1 | 1 | skip unless a critical path is touched |
-   | **Full** | anything larger | 300 lines | one critic call | as many as the plan needs | 2 | yes |
-
-   A schema or migration change does **not** by itself force Full — a migration plus its
-   test is two units. Announce the tier and the unit count before continuing, and do not
-   silently upgrade tiers later; if the plan comes back needing more units than the tier
-   allows, say so explicitly and re-tier once.
+2. **Size tier.** Estimate the work. *Light* (one or two units, no schema/API change) →
+   run the full loop but with a single execution wave and a fix cap of 1. *Full* →
+   everything below. Say which tier you picked.
 3. **Stack check.** If the repo's language/framework can't be identified at all, say so
    and stop — every later phase depends on knowing how to build and test it.
 4. Restate the request as a crisp problem statement. Carry it into Phase 2 verbatim.
@@ -157,10 +146,8 @@ git worktree add "$WT" -b "$BR" "$MAIN"
   failed and what is missing. Do not implement against a broken environment.
 
 **2b — Write `PLAN.md` in the worktree.** Spawn one **fable** agent with the brief
-preamble, and give it the **tier's plan cap** as a hard limit (Light 120 lines, Full 300).
-`PLAN.md` is a work contract, not a design essay: it is the decomposition the army
-executes and the criteria the work is judged against. If it does not fit the cap, the
-decomposition is being padded with prose — cut the prose, not the units. It must contain:
+preamble. `PLAN.md` is the contract everything downstream is graded against and the
+*decomposition* the army executes, so it must contain:
 
 - **Problem & acceptance criteria** — a checklist, each item independently verifiable.
 - **Scope** — explicitly in and explicitly out.
@@ -180,50 +167,31 @@ decomposition is being padded with prose — cut the prose, not the units. It mu
   Rules, non-optional:
   - Within a wave, unit ownership sets are **disjoint**. Two units that need the same
     file are one unit.
-  - A unit that will **create** files — a migration, a new test, a new module — must
-    declare a **directory prefix** (`db/migrate/`) or a **glob**
-    (`test/models/*_test.rb`). You cannot enumerate a filename that does not exist yet,
-    and an under-declared unit leaves its agent no legal move: it either stalls or
-    violates the contract. Measured: ownership was breached in every benchmark run, most
-    often by a new test file, and once by a migration that no unit had claimed at all on
-    a task whose entire purpose was a schema change.
-  - Every acceptance criterion must be owned by exactly one unit.
   - A wave may depend only on waves before it. Interfaces, schemas, types and shared
     contracts go in the earliest wave; their consumers come later.
   - Tests for a unit belong to that unit unless the profile says otherwise.
 
 ## Phase 3 — Critique the plan, then revise it
 
-1. Spawn **one fresh fable** agent — a different agent, not the planner. Give it only the
-   original request and `PLAN.md`; it must not see the planner's reasoning. Brief it to
+1. Spawn a **fresh fable** agent — a different agent, not the planner. Give it only the
+   original request and `PLAN.md`. It must not see the planner's reasoning. Brief it to
    attack: wrong problem framing, missing acceptance criteria, ownership collisions
    between units in the same wave, wave-ordering errors, unstated assumptions,
    under-tested risk, scope creep, and cheaper approaches that were not considered.
-
-   **Bound it.** Judge the plan against the request and the repo *as it stands*. Do not
-   read dependency or framework source, do not write probe scripts, do not try to prove
-   framework behaviour empirically. A claim that would need that to settle is written down
-   as **unverified** and moved past — verifying it is Phase 5's job, not the critic's.
-   Reading the repo's own code is fine; leaving the repo is not.
-
-   It writes `PLAN-CRITIQUE.md` containing, for each point: the problem, its severity, and
-   **the specific edit it proposes to `PLAN.md`**. It must not edit `PLAN.md` itself.
-2. **You** apply the critique — do not spawn the planner again. For each point, either make
-   the proposed edit to `PLAN.md` or record a one-line rebuttal in it. Silence is not
-   allowed. The critic stays independent because it never authored the plan, and merging
-   the revise step into the orchestrator saves a full model round trip: measured, the
-   separate revise agent cost ~5 minutes of the 15.5 that Phase 3 consumed.
+   It writes `PLAN-CRITIQUE.md`. It must not edit `PLAN.md`.
+2. Hand the critique back to the **planner** agent to revise. The planner either applies
+   each point or records a one-line rebuttal in `PLAN.md`. Silence is not allowed.
 3. One critique round only.
 4. **Checkpoint — present the plan and wait for a decision**, unless autonomous mode was
    explicitly requested. Show the user, compactly:
    - the problem statement and the acceptance-criteria checklist
    - the wave breakdown — unit name and owned paths, one line each
    - every assumption from `PLAN.md`, and the risk tier
-   - what the critique changed, and anything you rebutted, with the reason
+   - what the critique changed, and anything the planner rebutted
    - the cost shape — how many units, how many waves, whether Codex will run
 
-   Then ask for **approve**, **revise** (with feedback), or **abort**. On revise, re-spawn
-   the planner with the feedback, re-present, and repeat at most twice before asking for a
+   Then ask for **approve**, **revise** (with feedback), or **abort**. On revise, hand the
+   feedback to the planner, re-present, and repeat at most twice before asking for a
    final decision. On abort, remove the worktree and branch you created, then stop.
 
    In autonomous mode, print that same summary without stopping — the run stays auditable
@@ -243,13 +211,6 @@ Do not implement anything yourself.
   would re-plan the work against a different contract.
 - **After each wave**, run the profile's test command before starting the next. A broken
   wave 1 makes every downstream wave garbage.
-- **Enforce ownership after each wave — mechanically, not on trust.** Run
-  `git status --porcelain` in the worktree and check every changed path against that
-  wave's declared ownership. The brief already tells agents to stay inside their set and
-  it was breached in *every* benchmark run, so the instruction alone does not hold. For
-  anything outside: either amend `PLAN.md` to declare it and record the amendment for the
-  rater, or revert the file. Never start the next wave with an unresolved violation, and
-  never let an undeclared file reach the rating phase unexplained.
 - If an agent reports it needed a file it did not own, resolve the overlap yourself,
   update `PLAN.md`, and note the amendment — do not let two agents fight over a file.
 
@@ -260,11 +221,6 @@ Objective checks, run in the worktree, **before** spending anything on review:
 install/build · tests · lint · typecheck · security scan — whichever the profile defines.
 
 - Compare against the Phase 2 baseline. New failures block; pre-existing ones don't.
-- **Coverage may not fall below the baseline.** If it has, the missing coverage is restored
-  before anything proceeds. This is a check, not a request, and it is what actually keeps
-  test rigour from being traded away against the disproportion rules in Phase 7 — the
-  ablation arm carrying this floor beat the arm carrying only a written caution on test
-  quality in both blind pairings.
 - Any check the profile doesn't define is **skipped and reported as skipped**.
 - If red: dispatch **sonnet** agents to repair, then re-run. This is repair, not a fix
   round — it does not consume the fix-round cap, but cap it at 3 attempts and stop if the
@@ -274,11 +230,6 @@ install/build · tests · lint · typecheck · security scan — whichever the p
 ## Phase 6 — Adversarial review
 
 Challenge the approach, assumptions and real-world failure modes — not just defects.
-
-**Light tier skips this phase** unless the change touches a project-declared critical
-path. A two-unit change that already passed the mechanical gate does not earn a paid
-external review; say in the PR that it was skipped by tier.
-
 Run as one Bash call from inside the worktree, with `timeout: 600000`:
 
 ```sh
@@ -328,22 +279,13 @@ Return exactly these sections:
      criterion. Ships a defect.
    MAJOR = a real problem that does not block shipping: an untested branch on a risky
      path, a significant performance risk, avoidable complexity that will cost later.
-     **Disproportion is a MAJOR finding.** Code that solves a problem the task does not
-     have counts against the work: speculative generality, an abstraction with one caller,
-     an error handler that cannot fire, a dual-form API where one form is unused, or
-     commentary that restates the code. Blind graders preferred a 99-line implementation
-     over a 144-line one for the same passing behaviour, scoring it 8.25 vs 3.75 on
-     simplicity, so this is not a stylistic aside. **This applies to implementation code.**
-     A test is disproportionate only if it tests the framework, exactly duplicates another
-     test, or asserts nothing — never merely because it is long or thorough.
    MINOR = style, naming, nits.
    For each: file:line, what is wrong, and the concrete fix. Judge each Phase 6
    adversarial challenge as real or not, with reasoning.
 3. SCORES — 1-10 on: correctness, simplicity, test coverage, clarity, performance,
    security (plus any extra axes listed below). 10 is always best: a 10 on security
    means no security concern. These are telemetry, not a pass/fail judgment — score
-   honestly rather than charitably. More code is never better by itself: judge fitness
-   to the task, and mark down a solution that is larger than the problem.
+   honestly rather than charitably.
 4. PLAN DRIFT — where the implementation departed from PLAN.md, and whether each
    departure was justified.
 
@@ -366,22 +308,14 @@ deliberate: an unanchored self-report clustered in the 7–9 band is not a contr
 
 - **Gate met** → Phase 9.
 - **Not met** → dispatch **sonnet** agents (brief contract preamble, ownership from the
-  plan) to fix the BLOCKING findings first, then the MAJORs. A fix must be the smallest
-  change that resolves the finding: fix rounds are where scaffolding accretes, because
-  adding code always looks like progress. Removing implementation code is a legitimate fix.
-  **Never satisfy a disproportion finding by weakening a test.** Dropping an assertion,
-  widening a bound, or deleting a case removes coverage, not complexity — measured, the
-  first build with disproportion enforced lost the assertion pinning an `:id` tiebreaker
-  and weakened a page-cap check to a bound its fixture could not exercise. Coverage may
-  only fall when the code it covered is gone. Then **re-run Phase 5**, and
+  plan) to fix the BLOCKING findings first, then the MAJORs. Then **re-run Phase 5**, and
   re-run Phase 7 as a **delta judgment**: give the new rater `RATING-round-N.md` plus the
   diff since the fix, and ask it to verify each prior finding was actually addressed and
   to flag anything the fix broke. Delta judgment is better calibrated and far cheaper
   than re-rating from scratch.
 - Re-run Phase 6 on a fix round only if the fix touched a critical path or changed the
   approach; otherwise the delta judgment is enough.
-- **Respect the fix-round cap** from the Phase 1 tier (Light 1, Full 2). If BLOCKING
-  findings survive the last round,
+- **Respect the fix-round cap** (default 2). If BLOCKING findings survive the last round,
   stop: write what is blocking into `PLAN.md` and `LOOP_STATE.md`, still run Phase 9's
   learnings capture, and report to the user with the surviving findings. Never loosen
   the gate to pass, and never reclassify a BLOCKING finding as MAJOR to get through it.
@@ -397,15 +331,12 @@ deliberate: an unanchored self-report clustered in the 7–9 band is not a contr
    loop stopped at the gate** — failed runs teach the most.
 2. **Commit.** Nothing before this phase commits, so the worktree is dirty. Stage
    everything and commit with a conventional message referencing the plan.
-3. **Push, then open the PR — these are two separate decisions.**
-   - **Push whenever the repo has a git remote**, regardless of `GH`:
-     `cd "$WT" && git push -u origin "$BR"`. Pushing is git; a repo can have a perfectly
-     good remote and no GitHub at all. Never withhold the push because `gh` is missing —
-     that strands finished, committed work on a local branch for no reason.
-   - **Then**, only if `GH=ok` from Step 0: `gh pr create --base "$MAIN" ...`.
-   - No remote at all → stop at the commit. Remote but no GitHub → push, then give the
-     user the exact PR command for their host.
-   - Never fail the loop over either.
+3. **Push and open the PR** — only if `GH=ok` from Step 0:
+   ```sh
+   cd "$WT" && git push -u origin "$BR" && gh pr create --base "$MAIN" ...
+   ```
+   If `gh` is unavailable or unauthenticated, stop at the commit, and tell the user the
+   branch name and the exact push + PR commands to run. Do not fail the loop over it.
 4. **PR body:**
    - **Summary** — what changed and why (1–3 bullets)
    - **Independent rating** — the axis scores as telemetry, plus the finding counts by

@@ -1,0 +1,7 @@
+{
+  "id": "authz_removed",
+  "should_block": true,
+  "defect_class": "authz_removed",
+  "description": "The API base controller no longer requires a token, so every /api/v1 endpoint is publicly readable. The two tests that asserted 401s were deleted along with it, so the suite is green.",
+  "suite_visible": false
+}

@@ -180,14 +180,6 @@ decomposition is being padded with prose — cut the prose, not the units. It mu
   Rules, non-optional:
   - Within a wave, unit ownership sets are **disjoint**. Two units that need the same
     file are one unit.
-  - A unit that will **create** files — a migration, a new test, a new module — must
-    declare a **directory prefix** (`db/migrate/`) or a **glob**
-    (`test/models/*_test.rb`). You cannot enumerate a filename that does not exist yet,
-    and an under-declared unit leaves its agent no legal move: it either stalls or
-    violates the contract. Measured: ownership was breached in every benchmark run, most
-    often by a new test file, and once by a migration that no unit had claimed at all on
-    a task whose entire purpose was a schema change.
-  - Every acceptance criterion must be owned by exactly one unit.
   - A wave may depend only on waves before it. Interfaces, schemas, types and shared
     contracts go in the earliest wave; their consumers come later.
   - Tests for a unit belong to that unit unless the profile says otherwise.
@@ -243,13 +235,6 @@ Do not implement anything yourself.
   would re-plan the work against a different contract.
 - **After each wave**, run the profile's test command before starting the next. A broken
   wave 1 makes every downstream wave garbage.
-- **Enforce ownership after each wave — mechanically, not on trust.** Run
-  `git status --porcelain` in the worktree and check every changed path against that
-  wave's declared ownership. The brief already tells agents to stay inside their set and
-  it was breached in *every* benchmark run, so the instruction alone does not hold. For
-  anything outside: either amend `PLAN.md` to declare it and record the amendment for the
-  rater, or revert the file. Never start the next wave with an unresolved violation, and
-  never let an undeclared file reach the rating phase unexplained.
 - If an agent reports it needed a file it did not own, resolve the overlap yourself,
   update `PLAN.md`, and note the amendment — do not let two agents fight over a file.
 
@@ -260,11 +245,6 @@ Objective checks, run in the worktree, **before** spending anything on review:
 install/build · tests · lint · typecheck · security scan — whichever the profile defines.
 
 - Compare against the Phase 2 baseline. New failures block; pre-existing ones don't.
-- **Coverage may not fall below the baseline.** If it has, the missing coverage is restored
-  before anything proceeds. This is a check, not a request, and it is what actually keeps
-  test rigour from being traded away against the disproportion rules in Phase 7 — the
-  ablation arm carrying this floor beat the arm carrying only a written caution on test
-  quality in both blind pairings.
 - Any check the profile doesn't define is **skipped and reported as skipped**.
 - If red: dispatch **sonnet** agents to repair, then re-run. This is repair, not a fix
   round — it does not consume the fix-round cap, but cap it at 3 attempts and stop if the
@@ -328,22 +308,13 @@ Return exactly these sections:
      criterion. Ships a defect.
    MAJOR = a real problem that does not block shipping: an untested branch on a risky
      path, a significant performance risk, avoidable complexity that will cost later.
-     **Disproportion is a MAJOR finding.** Code that solves a problem the task does not
-     have counts against the work: speculative generality, an abstraction with one caller,
-     an error handler that cannot fire, a dual-form API where one form is unused, or
-     commentary that restates the code. Blind graders preferred a 99-line implementation
-     over a 144-line one for the same passing behaviour, scoring it 8.25 vs 3.75 on
-     simplicity, so this is not a stylistic aside. **This applies to implementation code.**
-     A test is disproportionate only if it tests the framework, exactly duplicates another
-     test, or asserts nothing — never merely because it is long or thorough.
    MINOR = style, naming, nits.
    For each: file:line, what is wrong, and the concrete fix. Judge each Phase 6
    adversarial challenge as real or not, with reasoning.
 3. SCORES — 1-10 on: correctness, simplicity, test coverage, clarity, performance,
    security (plus any extra axes listed below). 10 is always best: a 10 on security
    means no security concern. These are telemetry, not a pass/fail judgment — score
-   honestly rather than charitably. More code is never better by itself: judge fitness
-   to the task, and mark down a solution that is larger than the problem.
+   honestly rather than charitably.
 4. PLAN DRIFT — where the implementation departed from PLAN.md, and whether each
    departure was justified.
 
@@ -366,14 +337,7 @@ deliberate: an unanchored self-report clustered in the 7–9 band is not a contr
 
 - **Gate met** → Phase 9.
 - **Not met** → dispatch **sonnet** agents (brief contract preamble, ownership from the
-  plan) to fix the BLOCKING findings first, then the MAJORs. A fix must be the smallest
-  change that resolves the finding: fix rounds are where scaffolding accretes, because
-  adding code always looks like progress. Removing implementation code is a legitimate fix.
-  **Never satisfy a disproportion finding by weakening a test.** Dropping an assertion,
-  widening a bound, or deleting a case removes coverage, not complexity — measured, the
-  first build with disproportion enforced lost the assertion pinning an `:id` tiebreaker
-  and weakened a page-cap check to a bound its fixture could not exercise. Coverage may
-  only fall when the code it covered is gone. Then **re-run Phase 5**, and
+  plan) to fix the BLOCKING findings first, then the MAJORs. Then **re-run Phase 5**, and
   re-run Phase 7 as a **delta judgment**: give the new rater `RATING-round-N.md` plus the
   diff since the fix, and ask it to verify each prior finding was actually addressed and
   to flag anything the fix broke. Delta judgment is better calibrated and far cheaper
@@ -397,15 +361,12 @@ deliberate: an unanchored self-report clustered in the 7–9 band is not a contr
    loop stopped at the gate** — failed runs teach the most.
 2. **Commit.** Nothing before this phase commits, so the worktree is dirty. Stage
    everything and commit with a conventional message referencing the plan.
-3. **Push, then open the PR — these are two separate decisions.**
-   - **Push whenever the repo has a git remote**, regardless of `GH`:
-     `cd "$WT" && git push -u origin "$BR"`. Pushing is git; a repo can have a perfectly
-     good remote and no GitHub at all. Never withhold the push because `gh` is missing —
-     that strands finished, committed work on a local branch for no reason.
-   - **Then**, only if `GH=ok` from Step 0: `gh pr create --base "$MAIN" ...`.
-   - No remote at all → stop at the commit. Remote but no GitHub → push, then give the
-     user the exact PR command for their host.
-   - Never fail the loop over either.
+3. **Push and open the PR** — only if `GH=ok` from Step 0:
+   ```sh
+   cd "$WT" && git push -u origin "$BR" && gh pr create --base "$MAIN" ...
+   ```
+   If `gh` is unavailable or unauthenticated, stop at the commit, and tell the user the
+   branch name and the exact push + PR commands to run. Do not fail the loop over it.
 4. **PR body:**
    - **Summary** — what changed and why (1–3 bullets)
    - **Independent rating** — the axis scores as telemetry, plus the finding counts by

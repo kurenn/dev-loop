@@ -1,0 +1,409 @@
+diff --git a/app/controllers/api/v1/base_controller.rb b/app/controllers/api/v1/base_controller.rb
+new file mode 100644
+index 0000000..ce4436e
+--- /dev/null
++++ b/app/controllers/api/v1/base_controller.rb
+@@ -0,0 +1,13 @@
++module Api
++  module V1
++    class BaseController < ActionController::API
++      # Intentionally parallel to ApplicationController, not a subclass of
++      # it (see PLAN.md Design decision 1). Any cross-cutting filter added
++      # to ApplicationController later (auth, tenancy, request context)
++      # will NOT apply here and must be added to this class too.
++      rescue_from ActiveRecord::RecordNotFound do
++        render json: { error: "not_found" }, status: :not_found
++      end
++    end
++  end
++end
+diff --git a/app/controllers/api/v1/projects_controller.rb b/app/controllers/api/v1/projects_controller.rb
+new file mode 100644
+index 0000000..1930966
+--- /dev/null
++++ b/app/controllers/api/v1/projects_controller.rb
+@@ -0,0 +1,82 @@
++module Api
++  module V1
++    class ProjectsController < BaseController
++      # Pagination is best-effort traversal, not a snapshot: each page is an
++      # independent LIMIT/OFFSET query against a live table, not a query
++      # against a fixed point in time. A project concurrently inserted,
++      # renamed, archived, or deleted before the current offset can shift
++      # every row after it, so a record can appear on two pages or be
++      # skipped entirely between requests. Clients should de-duplicate by
++      # `id` and treat the list as eventually consistent, not a consistent
++      # cursor over a frozen set. Cursor/keyset pagination was considered
++      # and scoped out (see PLAN.md "Out") to keep this endpoint hand-rolled
++      # and simple; note that keyset on (name, id) would not even fix the
++      # rename case above — only a full snapshot strategy would, which is a
++      # re-architecture, not a pagination-style change.
++      def index
++        scope = Project.active
++        total = scope.count
++        records = scope.select(*LIST_ATTRIBUTES)
++                        .order(:name, :id)
++                        .limit(per_page)
++                        .offset((page - 1) * per_page)
++
++        render json: {
++          projects: records.as_json(only: LIST_ATTRIBUTES),
++          pagination: {
++            page: page,
++            per_page: per_page,
++            total_count: total,
++            total_pages: (total.to_f / per_page).ceil
++          }
++        }
++      end
++
++      def show
++        project = Project.find(params[:id])
++        render json: project.as_json(only: [ :id, :name, :description, :archived ])
++      end
++
++      private
++
++      # Single source of truth for the list endpoint's attribute allowlist,
++      # shared by the `select` (limits what is read off disk) and the
++      # `as_json(only:)` (limits what is serialized). Keeping these as one
++      # constant instead of two hand-synced literals prevents the silent
++      # no-op where adding an attribute to one list without the other
++      # appears to work (a partially loaded record's `as_json(only:)`
++      # quietly drops any attribute not also present in `select`). Not used
++      # by `show`, which loads and serializes the full record including
++      # `description`.
++      LIST_ATTRIBUTES = %i[id name archived].freeze
++
++      # Upper bound on `page`. Keeps the max possible OFFSET (MAX_PAGE * max
++      # per_page) four orders of magnitude inside SQLite's int64 bind limit,
++      # so a caller-controlled `page` can never overflow `(page - 1) * per_page`
++      # into a StatementInvalid/500. Deliberately a fixed constant, not
++      # data-dependent (e.g. not `total_pages + 1`), so the echoed
++      # `pagination.page` stays a stable, predictable contract.
++      MAX_PAGE = 1_000_000
++
++      # Clamped per Design decision 2. `.to_s` guards against non-String
++      # param shapes (e.g. a Hash/Array from `?page[]=1`) that would make
++      # `Integer(..., exception: false)` raise TypeError instead of
++      # returning nil. Base 10 is explicit so decimal-looking input isn't
++      # reinterpreted as hex/octal/binary (e.g. `010` must mean ten, not
++      # eight; `0x10` must fall back to the default rather than mean 16).
++      def page
++        @page ||= begin
++          n = Integer(params[:page].to_s, 10, exception: false)
++          n.nil? || n < 1 ? 1 : [ n, MAX_PAGE ].min
++        end
++      end
++
++      def per_page
++        @per_page ||= begin
++          n = Integer(params[:per_page].to_s, 10, exception: false)
++          n.nil? ? 25 : n.clamp(1, 100)
++        end
++      end
++    end
++  end
++end
+diff --git a/config/routes.rb b/config/routes.rb
+index 6080898..b95c5d5 100644
+--- a/config/routes.rb
++++ b/config/routes.rb
+@@ -1,4 +1,11 @@
+ Rails.application.routes.draw do
+   resources :projects, only: [ :index, :show ]
++
++  namespace :api do
++    namespace :v1 do
++      resources :projects, only: [ :index, :show ]
++    end
++  end
++
+   root "projects#index"
+ end
+diff --git a/test/controllers/api/v1/projects_controller_test.rb b/test/controllers/api/v1/projects_controller_test.rb
+new file mode 100644
+index 0000000..823b604
+--- /dev/null
++++ b/test/controllers/api/v1/projects_controller_test.rb
+@@ -0,0 +1,280 @@
++require "test_helper"
++
++class Api::V1::ProjectsControllerTest < ActionDispatch::IntegrationTest
++  test "index returns envelope with projects and pagination" do
++    get api_v1_projects_url
++    assert_response :success
++    assert_equal "application/json", response.media_type
++
++    body = JSON.parse(response.body)
++    assert_equal %w[pagination projects], body.keys.sort
++    assert_kind_of Array, body["projects"]
++    assert_kind_of Hash, body["pagination"]
++  end
++
++  test "index serializes only id, name, archived" do
++    get api_v1_projects_url
++    assert_response :success
++
++    body = JSON.parse(response.body)
++    record = body["projects"].first
++    assert_not_nil record
++    assert_equal %w[archived id name], record.keys.sort
++  end
++
++  test "show serializes only id, name, description, archived" do
++    get api_v1_project_url(projects(:alpha))
++    assert_response :success
++
++    body = JSON.parse(response.body)
++    assert_equal %w[archived description id name], body.keys.sort
++  end
++
++  test "index defaults to page 1 per_page 25" do
++    expected_total = Project.active.count
++
++    get api_v1_projects_url
++    assert_response :success
++
++    pagination = JSON.parse(response.body)["pagination"]
++    assert_equal 1, pagination["page"]
++    assert_equal 25, pagination["per_page"]
++    assert_equal expected_total, pagination["total_count"]
++    assert_equal (expected_total.to_f / 25).ceil, pagination["total_pages"]
++  end
++
++  test "per_page above max is clamped to 100" do
++    get api_v1_projects_url(per_page: 100_000)
++    assert_response :success
++
++    body = JSON.parse(response.body)
++    assert_equal 100, body["pagination"]["per_page"]
++    assert_operator body["projects"].length, :<=, 100
++  end
++
++  test "per_page zero clamps to 1" do
++    Project.create!(name: "Extra One", archived: false)
++    Project.create!(name: "Extra Two", archived: false)
++
++    get api_v1_projects_url(per_page: 0)
++    assert_response :success
++
++    body = JSON.parse(response.body)
++    assert_equal 1, body["pagination"]["per_page"]
++    assert_equal 1, body["projects"].length
++  end
++
++  test "negative per_page clamps to 1" do
++    Project.create!(name: "Extra One", archived: false)
++    Project.create!(name: "Extra Two", archived: false)
++
++    get api_v1_projects_url(per_page: -5)
++    assert_response :success
++
++    body = JSON.parse(response.body)
++    assert_equal 1, body["pagination"]["per_page"]
++    assert_equal 1, body["projects"].length
++  end
++
++  test "page zero clamps to 1" do
++    get api_v1_projects_url(page: 0)
++    assert_response :success
++    page_zero_body = JSON.parse(response.body)
++
++    get api_v1_projects_url(page: 1)
++    assert_response :success
++    page_one_body = JSON.parse(response.body)
++
++    assert_equal page_one_body, page_zero_body
++  end
++
++  test "negative page clamps to 1" do
++    get api_v1_projects_url(page: -1)
++    assert_response :success
++    negative_page_body = JSON.parse(response.body)
++
++    get api_v1_projects_url(page: 1)
++    assert_response :success
++    page_one_body = JSON.parse(response.body)
++
++    assert_equal page_one_body, negative_page_body
++  end
++
++  test "non-numeric page and per_page fall back to defaults" do
++    get api_v1_projects_url(page: "abc", per_page: "abc")
++    assert_response :success
++
++    pagination = JSON.parse(response.body)["pagination"]
++    assert_equal 1, pagination["page"]
++    assert_equal 25, pagination["per_page"]
++  end
++
++  test "page beyond last returns empty records with pagination state" do
++    expected_total = Project.active.count
++
++    get api_v1_projects_url(page: 999_999)
++    assert_response :success
++
++    body = JSON.parse(response.body)
++    assert_equal [], body["projects"]
++    assert_equal 999_999, body["pagination"]["page"]
++    assert_equal expected_total, body["pagination"]["total_count"]
++    assert_equal (expected_total.to_f / 25).ceil, body["pagination"]["total_pages"]
++  end
++
++  test "pages partition the active set without duplicates or gaps" do
++    5.times { |i| Project.create!(name: "Pager #{i}", archived: false) }
++    full_set_ids = Project.active.order(:name, :id).pluck(:id)
++    per_page = 2
++    total_pages = (full_set_ids.size.to_f / per_page).ceil
++
++    collected_ids = []
++    (1..total_pages).each do |page|
++      get api_v1_projects_url(page: page, per_page: per_page)
++      assert_response :success
++
++      records = JSON.parse(response.body)["projects"]
++      assert_operator records.length, :<=, per_page
++      collected_ids.concat(records.map { |r| r["id"] })
++    end
++
++    assert_equal full_set_ids.size, collected_ids.size
++    assert_equal collected_ids.uniq.size, collected_ids.size
++    assert_equal full_set_ids, collected_ids
++  end
++
++  test "duplicate names are ordered by id tiebreaker" do
++    dup_first = Project.create!(name: "Same", archived: false)
++    dup_second = Project.create!(name: "Same", archived: false)
++    assert_operator dup_first.id, :<, dup_second.id
++
++    total = Project.active.count
++
++    # Behavioral check: on this schema `id` is a SQLite ROWID alias, so a
++    # full table scan for `ORDER BY name` alone already visits rows in
++    # ascending id order, and SQLite's ORDER BY sort is stable for ties in
++    # this configuration (no index on `name`) -- so dropping the `:id`
++    # tiebreaker would NOT change this observed row order and this
++    # assertion alone would not catch that regression. We pin the actual
++    # generated SQL below so removing the tiebreaker fails loudly instead
++    # of silently passing by SQLite coincidence.
++    assert_queries_match(/ORDER BY "projects"\."name" ASC, "projects"\."id" ASC/, count: 1) do
++      get api_v1_projects_url(per_page: total)
++    end
++    assert_response :success
++
++    ids = JSON.parse(response.body)["projects"].map { |r| r["id"] }
++    assert_equal 1, ids.count(dup_first.id)
++    assert_equal 1, ids.count(dup_second.id)
++    assert_operator ids.index(dup_first.id), :<, ids.index(dup_second.id)
++  end
++
++  test "list is bounded to per_page even when many rows exist" do
++    35.times { |i| Project.create!(name: format("Bulk%03d", i), archived: false) }
++
++    # NOTE: do not call `Project.active.count` (or any query issuing the
++    # same SQL as the controller) before this block. `ActiveRecord::TestFixtures`
++    # enables the query cache for the entire test transaction, so a prior
++    # identical COUNT would prime the cache and make the controller's own
++    # COUNT invisible to `assert_queries_count`, masking a real 3rd query.
++    #
++    # The query count alone does not prove the relation is bounded: a
++    # regression that replaces the LIMIT/OFFSET relation with
++    # `scope.order(:name, :id).to_a[(page - 1) * per_page, per_page]` (full
++    # table load + Ruby slice, keeping the separate COUNT) is still exactly
++    # 2 queries with a byte-identical response envelope, and would still
++    # pass every other assertion in this file. Pin the actual SQL so that
++    # regression fails loudly instead of shipping silently. The regex also
++    # pins the `select(:id, :name, :archived)` projection, not just the
++    # LIMIT/OFFSET bound: deleting the `select` (reverting to `SELECT
++    # "projects".*`) previously left the whole suite green with no failing
++    # assertion, so both properties are guarded by this one pin.
++    assert_queries_count(2, include_schema: false) do
++      assert_queries_match(/SELECT "projects"\."id", "projects"\."name", "projects"\."archived" .* LIMIT \? OFFSET \?/, count: 1) do
++        get api_v1_projects_url
++      end
++    end
++    assert_response :success
++
++    expected_total = Project.active.count
++    assert_operator expected_total, :>=, 31
++
++    body = JSON.parse(response.body)
++    assert_equal 25, body["projects"].length
++    assert_equal expected_total, body["pagination"]["total_count"]
++  end
++
++  test "show returns an archived project" do
++    get api_v1_project_url(projects(:zulu))
++    assert_response :success
++
++    body = JSON.parse(response.body)
++    assert_equal "Zulu", body["name"]
++    assert_equal true, body["archived"]
++  end
++
++  test "index lists only active projects" do
++    get api_v1_projects_url
++    assert_response :success
++
++    body = JSON.parse(response.body)
++    names = body["projects"].map { |r| r["name"] }
++    assert_includes names, "Alpha"
++    assert_not_includes names, "Zulu"
++    assert_equal Project.active.count, body["pagination"]["total_count"]
++  end
++
++  test "show missing id returns JSON 404" do
++    get api_v1_project_url(id: 999_999_999)
++    assert_response :not_found
++    assert_equal "application/json", response.media_type
++    assert_equal({ "error" => "not_found" }, JSON.parse(response.body))
++  end
++
++  test "absurdly large page is clamped instead of overflowing the offset" do
++    expected_total = Project.active.count
++
++    [ 2**63, 10**30 ].each do |huge_page|
++      get api_v1_projects_url(page: huge_page)
++      assert_response :success
++
++      body = JSON.parse(response.body)
++      assert_equal [], body["projects"]
++      assert_equal 1_000_000, body["pagination"]["page"]
++      assert_equal expected_total, body["pagination"]["total_count"]
++    end
++  end
++
++  test "zero-padded and prefixed numerics are parsed as base 10" do
++    get api_v1_projects_url(per_page: "010")
++    assert_response :success
++    assert_equal 10, JSON.parse(response.body)["pagination"]["per_page"]
++
++    get api_v1_projects_url(page: "0x10")
++    assert_response :success
++    assert_equal 1, JSON.parse(response.body)["pagination"]["page"]
++  end
++
++  test "empty table returns zero totals without dividing by zero" do
++    # `Project.delete_all` alone raises SQLite3::ConstraintException:
++    # `tasks.project_id` has a DB-level foreign key and the fixture tasks
++    # reference `alpha`. Clear the dependent rows first. This runs inside
++    # the test transaction, so it is rolled back and does not affect other
++    # tests.
++    Task.delete_all
++    Project.delete_all
++
++    get api_v1_projects_url
++    assert_response :success
++
++    assert_equal({
++      "projects" => [],
++      "pagination" => {
++        "page" => 1,
++        "per_page" => 25,
++        "total_count" => 0,
++        "total_pages" => 0
++      }
++    }, JSON.parse(response.body))
++  end
++end

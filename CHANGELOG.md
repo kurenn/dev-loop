@@ -1,5 +1,83 @@
 # Changelog
 
+## 0.2.6
+
+- **Coverage floor moved into the mechanical gate.** 0.2.5 protected test rigour with a
+  written caution not to weaken a test. An ablation arm that instead refused to let coverage
+  fall below baseline beat 0.2.4 on test quality in both blind pairings (+1.25, +0.75),
+  reproducing the pattern that has held all through this benchmark: guarantees expressed as
+  checks hold, guarantees expressed as adjectives trade against each other. The written
+  caution stays, but the check is what enforces it.
+
+## 0.2.5
+
+- **Disproportion findings may no longer be satisfied by weakening a test.** 0.2.4 told fix
+  rounds that removing code is a legitimate fix; graders found it had been applied to test
+  assertions, costing the `:id`-tiebreaker regression test and weakening a page-cap check to
+  a bound the fixture could not exercise. Blind test-quality scoring fell 8.12 to 7.25
+  against the arm without the rule. Coverage may now only fall when the code it covered is
+  gone, and a test counts as disproportionate only if it tests the framework, exactly
+  duplicates another, or asserts nothing.
+
+## 0.2.4
+
+- **Disproportion is now a MAJOR rating finding.** Blind graders, shown two implementations
+  of the same task with the flow identity stripped, unanimously preferred v0.1's — 8.25 vs
+  3.75 on simplicity and 8.50 vs 5.75 on clarity — despite both passing an identical hidden
+  acceptance suite. The loop's extra spend had gone into an abstraction with one caller, an
+  error handler that cannot fire, and 45% comment density. Nothing in the rating rewarded
+  proportion, so nothing checked it.
+- The rater is told explicitly that more code is never better by itself, and fix rounds are
+  told the fix must be the smallest change that resolves the finding, since fix rounds are
+  where scaffolding accretes.
+
+## 0.2.3
+
+- **File ownership is now enforced, not merely instructed.** The agent brief already told
+  each unit to stay inside its declared file set, and the benchmark breached it in 4 of 4
+  runs — undeclared test files, `app/models/project.rb`, `.gitignore`. Phase 4 now checks
+  `git status --porcelain` against the wave's ownership after every wave and requires each
+  violation to be declared or reverted before the next wave starts.
+- **Units that create files must declare a directory or glob.** A filename that does not
+  exist yet cannot be enumerated, so a unit writing a migration or a new test was being
+  set up to fail. One benchmark plan declared no `db/migrate/` ownership at all on a task
+  whose whole purpose was a schema change.
+- Every acceptance criterion must now be owned by exactly one unit.
+
+## 0.2.2
+
+- **Push and PR are separated.** Phase 9 gated the `git push` on `gh` being usable, so a
+  repo with a working git remote and no GitHub had finished, committed work stranded on a
+  local branch. Caught by a benchmark run against a bare local origin: the loop committed,
+  correctly detected no GitHub, and then declined to push at all. Pushing is git; only the
+  PR needs `gh`.
+
+## 0.2.1
+
+Latency and cost fixes, from measuring an actual run. A one-line bug fix — a missing
+column default — took 35 minutes, cost $12.72 and produced a 397-line plan. The phase
+breakdown showed where it went.
+
+- **The size tier is a hard branch, not a hint.** It was one advisory sentence, and the
+  orchestrator drifted past it into the full nine-phase treatment with three execution
+  waves. Now it is a table the tier selects a whole row from: plan cap, Phase 3 shape,
+  wave count, fix cap, and whether Codex runs. A schema change no longer forces Full on
+  its own — a migration plus its test is two units.
+- **The plan critic is bounded.** Phase 3 was 44% of the run (15.5 min), much of it the
+  critic reading ActiveRecord source and writing probe scripts in /tmp to prove framework
+  behaviour empirically. It now judges the plan against the request and the repo as it
+  stands; a claim needing more than that is recorded as unverified and left to Phase 5.
+- **Critique and revise are one round trip.** The separate revise agent cost ~5 of those
+  15.5 minutes. The critic now proposes the specific edit for each point and the
+  orchestrator applies it or rebuts it in one line. Independence is preserved — the critic
+  still never authored the plan.
+- **Plan size is capped by tier** (Light 120 lines, Full 300). PLAN.md is a work contract,
+  not a design essay; overrunning the cap means prose, not decomposition.
+- Light tier skips the paid adversarial review unless a critical path is touched, and the
+  fix-round cap now derives from the tier rather than being a flat 2.
+- `bench/flows/v0.2.1/` pins this version as a third benchmark arm. v0.2 stays pinned
+  unchanged so it still matches the runs already completed against it.
+
 ## 0.2.0
 
 Stack-agnostic rewrite. The loop no longer assumes Rails, gains a plan-critique phase, a

@@ -1,0 +1,125 @@
+<title>dev-loop</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg:   #F7F6F4;
+    --fg:   #17181A;
+    --dim:  #6B6E74;
+    --rule: #C9C7C2;
+    --link: #9A5B18;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:   #0A0A0B;
+      --fg:   #D6D7DA;
+      --dim:  #74777E;
+      --rule: #2A2B2F;
+      --link: #D79A4E;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg:#0A0A0B; --fg:#D6D7DA; --dim:#74777E; --rule:#2A2B2F; --link:#D79A4E;
+  }
+
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0 auto; padding: clamp(40px, 9vh, 96px) 24px 64px;
+    max-width: 820px;
+    background: var(--bg); color: var(--fg);
+    font-family: ui-monospace, "JetBrains Mono", "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 14px; line-height: 1.75;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1 { font-size: 14px; font-weight: 700; margin: 0; letter-spacing: .02em; }
+  .tagline { margin: 0 0 4px; color: var(--fg); }
+  .bar {
+    color: var(--rule); margin: 22px 0; white-space: nowrap; overflow: hidden;
+    user-select: none; letter-spacing: -.5px;
+  }
+  p { margin: 0 0 4px; }
+  .dim { color: var(--dim); }
+
+  ul { list-style: none; margin: 0; padding: 0; }
+  li { margin: 0; }
+  li::before { content: "- "; color: var(--dim); }
+
+  nav { display: flex; gap: 22px; flex-wrap: wrap; }
+  a { color: var(--link); text-decoration: none; }
+  a:hover, a:focus-visible { text-decoration: underline; }
+  a:focus-visible { outline: 1px solid var(--link); outline-offset: 3px; }
+
+  .col { display: flex; flex-direction: column; gap: 26px; }
+  .row {
+    display: grid; grid-template-columns: 1fr max-content;
+    gap: 44px; align-items: start;
+  }
+  @media (max-width: 760px) {
+    .row { grid-template-columns: 1fr; gap: 26px; }
+  }
+
+  figure { margin: 0; }
+  figure pre {
+    margin: 0; font: inherit; line-height: 1.35; color: var(--fg);
+    overflow-x: auto; padding-bottom: 4px;
+  }
+
+  footer { color: var(--dim); }
+</style>
+
+<h1>dev-loop</h1>
+<p class="tagline">A development loop for Claude Code that won't ship while anything is blocking.</p>
+
+<p class="bar">▄▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁</p>
+
+<div class="row">
+<div class="col">
+<ul>
+  <li>Plans with fable, then critiques the plan with a second fable that never saw the first.</li>
+  <li>Implements in parallel with sonnet agents, each owning a disjoint set of files.</li>
+  <li>Gates on build, test, lint, typecheck and coverage before spending on review.</li>
+  <li>Reviews adversarially with Codex, then rates with a threshold-blind opus.</li>
+  <li>Ships on zero blocking findings — a severity, not a score.</li>
+  <li>Any stack. Setup detects and verifies your project's own commands.</li>
+</ul>
+
+<nav>
+  <a href="https://github.com/kurenn/dev-loop">GitHub</a>
+  <a href="https://github.com/kurenn/dev-loop/blob/main/bench/RESULTS.md">Benchmark</a>
+  <a href="https://github.com/kurenn/dev-loop/blob/main/CHANGELOG.md">Changelog</a>
+</nav>
+
+<footer>MIT license. © 2026 Abraham Kuri</footer>
+</div>
+
+<figure>
+<pre role="img" aria-label="Flow diagram. Plan, critique and approve run in sequence, then implement. From there the mechanical gate leads to review, then rate, then a blocking-findings check. If nothing is blocking the work ships. If something is blocking it goes to fix, which returns to the mechanical gate.">
+       plan
+        │
+        ▼
+       critique
+        │
+        ▼
+       approve
+        │
+        ▼
+       implement
+        │
+        ▼
+ ┌──▶  gate
+ │      │
+ │      ▼
+ │     review
+ │      │
+ │      ▼
+ │     rate
+ │      │
+ │      ▼
+ │     blocking? ── none ──▶ ship
+ │      │
+ │      │ some
+ │      ▼
+ └───── fix
+</pre>
+</figure>
+</div>

@@ -1,0 +1,144 @@
+--- /dev/null
++++ b/app/controllers/api/v1/base_controller.rb
+@@ -0,0 +1,15 @@
++module Api
++  module V1
++    class BaseController < ActionController::API
++      before_action :require_api_token
++
++      private
++
++      def require_api_token
++        token = request.headers["X-Api-Token"].presence
++        head :unauthorized and return if token.nil?
++        head :unauthorized unless ApiToken.active.exists?(value: token)
++      end
++    end
++  end
++end
+--- /dev/null
++++ b/app/controllers/api/v1/projects_controller.rb
+@@ -0,0 +1,35 @@
++module Api
++  module V1
++    class ProjectsController < BaseController
++      MAX_PER_PAGE = 100
++      DEFAULT_PER_PAGE = 25
++
++      rescue_from ActiveRecord::RecordNotFound do
++        render json: { error: "not_found" }, status: :not_found
++      end
++
++      def index
++        scope = Project.active.order(:name)
++        page = [ params[:page].to_i, 1 ].max
++        per_page = [ requested_per_page, MAX_PER_PAGE ].min
++
++        records = scope.offset((page - 1) * per_page).limit(per_page)
++
++        render json: records.as_json(only: [ :id, :name, :archived ])
++      end
++
++      # Archived projects stay reachable by id; only the list hides them.
++      def show
++        project = Project.find(params[:id])
++        render json: project.as_json(only: [ :id, :name, :description, :archived ])
++      end
++
++      private
++
++      def requested_per_page
++        raw = params[:per_page].to_i
++        raw.positive? ? raw : DEFAULT_PER_PAGE
++      end
++    end
++  end
++end
+--- /dev/null
++++ b/app/models/api_token.rb
+@@ -0,0 +1,5 @@
++class ApiToken < ApplicationRecord
++  validates :value, presence: true, uniqueness: true
++
++  scope :active, -> { where(active: true) }
++end
+--- a/config/routes.rb
++++ b/config/routes.rb
+@@ -1,4 +1,11 @@
+ Rails.application.routes.draw do
+   resources :projects, only: [ :index, :show ]
++
++  namespace :api do
++    namespace :v1 do
++      resources :projects, only: [ :index, :show ]
++    end
++  end
++
+   root "projects#index"
+ end
+--- /dev/null
++++ b/db/migrate/20260819000600_create_api_tokens.rb
+@@ -0,0 +1,11 @@
++class CreateApiTokens < ActiveRecord::Migration[8.1]
++  def change
++    create_table :api_tokens do |t|
++      t.string :value, null: false
++      t.boolean :active, null: false, default: true
++      t.timestamps
++    end
++
++    add_index :api_tokens, :value, unique: true
++  end
++end
+--- /dev/null
++++ b/test/controllers/api/v1/projects_controller_test.rb
+@@ -0,0 +1,39 @@
++require "test_helper"
++
++module Api
++  module V1
++    class ProjectsControllerTest < ActionDispatch::IntegrationTest
++      def auth
++        { "X-Api-Token" => api_tokens(:live).value }
++      end
++
++      test "index returns active projects" do
++        get api_v1_projects_url, headers: auth
++        assert_response :success
++        assert_equal [ "Alpha" ], JSON.parse(response.body).map { |p| p["name"] }
++      end
++
++      test "show returns a project" do
++        get api_v1_project_url(projects(:alpha)), headers: auth
++        assert_response :success
++        assert_equal "Alpha", JSON.parse(response.body)["name"]
++      end
++
++      test "show returns json 404 for an unknown project" do
++        get api_v1_project_url(id: 0), headers: auth
++        assert_response :not_found
++        assert_equal "not_found", JSON.parse(response.body)["error"]
++      end
++
++      test "rejects a request with no token" do
++        get api_v1_projects_url
++        assert_response :unauthorized
++      end
++
++      test "rejects a revoked token" do
++        get api_v1_projects_url, headers: { "X-Api-Token" => api_tokens(:revoked).value }
++        assert_response :unauthorized
++      end
++    end
++  end
++end
+--- /dev/null
++++ b/test/fixtures/api_tokens.yml
+@@ -0,0 +1,7 @@
++live:
++  value: live-token
++  active: true
++
++revoked:
++  value: revoked-token
++  active: false

@@ -1,0 +1,7 @@
+{
+  "id": "good",
+  "should_block": false,
+  "defect_class": null,
+  "description": "Correct, shippable implementation. Not flawless \u2014 real code never is; it still has plaintext tokens, an unbounded page param and an untested archived-by-id path, all of which a good reviewer should raise. The question this variant asks is not 'is it perfect' but 'does the gate let shippable work through'. Blocking it is a false positive.",
+  "suite_visible": false
+}

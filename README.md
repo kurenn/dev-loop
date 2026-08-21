@@ -1,90 +1,114 @@
 # dev-loop
 
-A **virtuous development loop** as a Claude Code plugin — for any stack. One command
-chains nine phases with deliberate model tiers and a gate that can't be talked around:
+A development loop for Claude Code that won't ship while anything is blocking.
 
-| Phase | Who | Model |
-|---|---|---|
-| 1 · Triage & frame | the session | trivial work exits here; everything else picks a size tier |
-| 2 · Plan | one agent | **fable** — worktree, provisioning, baseline, `PLAN.md` |
-| 3 · Critique & revise | a *fresh* agent, then the planner | **fable** — attacks the plan cold, planner answers every point, then you approve |
-| 4 · Execute | unit agents, parallel *within* a wave | **sonnet** — disjoint file ownership, dependency-ordered waves |
-| 5 · Mechanical gate | the session | build · test · lint · typecheck · security, against a baseline |
-| 6 · Adversarial review | Codex, else a fresh agent | challenges the approach, not just defects |
-| 7 · Rate | an independent rater | **opus** — threshold-blind, severity-ranked findings |
-| 8 · Gate & fix | unit agents | **sonnet** — zero blocking findings, ≤ 2 rounds, delta-judged |
-| 9 · Learnings & ship | the session | appends durable learnings, commits, opens the PR |
+```
+       plan
+        │
+        ▼
+       critique                  a second agent, blind to the planner
+        │
+        ▼
+       approve                   --auto skips this stop
+        │
+        ▼
+       implement                 parallel, disjoint file ownership
+        │
+        ▼
+ ┌──▶  gate                      build · test · lint · typecheck · coverage
+ │      │
+ │      ▼
+ │     review                    codex, adversarial
+ │      │
+ │      ▼
+ │     rate                      opus, blind to the threshold
+ │      │
+ │      ▼
+ │     blocking? ── none ──▶ ship
+ │      │
+ │      │ some
+ │      ▼
+ └───── fix                      capped, then it stops rather than lowering the bar
+```
 
-The point is **separation of concerns**: a planner, an independent critic of the plan, an
-implementation army, an adversarial reviewer, an independent rater, a gated fixer, and a
-learning sink — so quality comes from structure, not willpower.
-
-It stops **once**, after the plan, and waits for you — the cheapest quality lever in the
-loop, since a wrong direction caught there costs less than any fix round. Everything after
-that runs unattended. `/dev-loop --auto <task>` skips the checkpoint and runs straight
-through to a PR; autonomous mode is never assumed, only asked for.
+Findings return to the **gate**, not to the reviewer — every fix is re-checked against the
+baseline before it is re-judged.
 
 ## Install
 
 ```sh
-/plugin marketplace add kurenn/dev-loop   # if not already on the kurenn marketplace
+/plugin marketplace add kurenn/dev-loop
 /plugin install dev-loop@kurenn
 ```
 
-## Usage
+### Or ask an agent
+
+Point Claude Code or Codex at **[AGENTS.md](AGENTS.md)**, or paste:
+
+> Install the dev-loop plugin from https://github.com/kurenn/dev-loop by following the
+> instructions in its AGENTS.md, then run the setup in this repository and tell me which
+> checks it could not verify.
+
+## Use
 
 ```sh
-/dev-loop-setup            # once per repo: detects and verifies the project profile
-/dev-loop <feature or bug> # run the full loop
+/dev-loop-setup             # once per repo
+/dev-loop <feature or bug>  # run the loop
 ```
 
-`/dev-loop-setup` is not optional busywork — it is what makes the loop stack-agnostic. It
-detects and **verifies** how this project installs, tests, lints, typechecks and scans,
-which gitignored files a fresh worktree needs to boot, and which specialist subagents
-exist for the stack, then writes it all into a `## Dev-loop config` block in `CLAUDE.md`.
-The loop reads that profile instead of guessing at runtime.
+`/dev-loop-setup` is what makes the loop stack-agnostic. It detects and **verifies** how
+your project installs, tests, lints, typechecks and scans, which gitignored files a fresh
+worktree needs to boot, and which specialist subagents exist — then writes a
+`## Dev-loop config` block into `CLAUDE.md`. A command that fails verification is left
+blank, and a blank check is *skipped and reported as skipped*, never assumed green.
 
-## Optional accelerators
+## The gate
 
-Neither is required; both are auto-detected:
+Not a score. It passes when all three hold:
+
+- Mechanical checks green against a pre-change baseline, **coverage not below** it
+- **Zero blocking findings** — wrong behaviour, data loss, a security hole, or an unmet
+  acceptance criterion
+- Every major finding fixed, or waived with a written reason
+
+The rater still emits 1–10 axis scores. They go in the PR body as telemetry and gate
+nothing, because an average cannot express severity.
+
+## Optional
+
+Both auto-detected, neither required:
 
 ```sh
-/plugin install codex@openai-codex     # Phase 6: out-of-family adversarial review
-/plugin install roundhouse@kurenn      # Phase 4: Rails specialist subagents
+/plugin install codex@openai-codex   # out-of-family adversarial review
+/plugin install roundhouse@kurenn    # Rails specialist subagents
 ```
 
-Without codex, Phase 6 uses an in-family reviewer — which shares training and blind spots
-with the implementers, and is labelled as weaker in the PR. Without stack specialists,
-Phase 4 uses general agents. `gh` is likewise optional: unauthenticated, the loop stops at
-a commit and hands you the push and PR commands.
+Without codex the review falls back to an in-family agent that shares blind spots with the
+implementers; the PR says so. Without a GitHub remote the loop commits and pushes, then
+hands you the PR command.
 
-## Design notes
+## Benchmark
 
-**Why waves.** Parallel agents in one worktree collide. So `PLAN.md` must decompose the
-work into units with **disjoint file ownership**, grouped into waves — parallel within a
-wave, serial between them, interfaces and schemas before their consumers. Ownership is
-declared in the plan and enforced in every agent brief.
+Built against its own benchmark — 17 loop runs, 60 gate replays, 24 blind gradings, hidden
+acceptance suites. Full method and raw numbers in **[bench/RESULTS.md](bench/RESULTS.md)**.
 
-**Why the gate is mechanical.** An unanchored 1–10 self-report clusters in the 7–9 band
-and drifts between rounds, so it makes a poor control. The gate here is: mechanical checks
-green against a pre-implementation baseline, **zero blocking findings**, every major
-finding fixed or waived with a written reason. The 1–10 axis scores still get produced —
-they go in the PR body as telemetry, where being approximate is harmless.
+The short version, including the parts that don't flatter it:
 
-**Why the rater is blind.** It is a fresh agent that never sees the threshold, judges
-against `PLAN.md` and the acceptance criteria, and ranks findings by severity rather than
-being asked for a number to compare against a bar it already knows.
+- An unguarded loop failed to provision a bootable worktree in 4 of 5 runs and reviewed red
+  code in 2 of 5. This one passes 8/8 mechanical assertions.
+- A scored gate (`overall ≥ 8.5`) passed work its own rater had flagged as needing action
+  before shipping. On a seeded corpus it blocked **30 of 30** artifacts, correct code
+  included; the severity gate caught 23 of 25 defects and false-blocked none.
+- It costs roughly **2×** a loop without the guarantees, and cutting 230 lines of
+  instruction barely moved that — the spend is the phases, not the prose.
+- On blind-graded code quality it reaches **parity**, not superiority. You are buying
+  process guarantees, not better code.
+- One Rails repo, two tasks. The stack-agnostic claim is designed for but unmeasured.
 
-**Why model tiers.** Fable plans and critiques, because plan errors are amplified by every
-phase downstream and are the most expensive errors in the loop. Sonnet implements and
-fixes, because the work is parallelizable and well-specified once the plan exists. A
-*different* model — opus — rates, so the grader shares neither the implementer's context
-nor the planner's.
-
-**Everything is a file.** `PLAN.md`, `PLAN-CRITIQUE.md`, `REVIEW-round-N.md`,
-`RATING-round-N.md` and `LOOP_STATE.md` all live in the worktree — so the loop is
-auditable, resumable after an interruption, and survives context compaction.
+Use it where the guarantees bind: a worktree that can't boot without copied secrets,
+genuinely parallel agent work, changes where a defect is expensive. On a small, safe change
+the Light tier exists so you aren't paying for guarantees that were never going to fire.
 
 ## License
 
-MIT © Abraham Kuri
+MIT © [Abraham Kuri](https://github.com/kurenn)
