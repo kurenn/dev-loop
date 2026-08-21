@@ -1,174 +1,376 @@
 ---
 name: dev-loop
-description: "Run the virtuous development loop for a Rails feature or bug — Opus plans, a parallel Sonnet specialist army implements (via roundhouse /rails-feature), Codex adversarially reviews, a fresh Opus reviewer rates the work against the plan, Sonnet agents fix until the quality gate passes, learnings are captured, and a PR is opened. Use for any non-trivial feature or bug. Prefers @kurenn/roundhouse and @openai-codex/codex; degrades gracefully without them. Run /dev-loop-setup once per repo first."
+description: "Full quality-gated development loop for a non-trivial feature or bug in any stack: plan → independent plan critique → parallel implementation waves → mechanical gate → adversarial review → independent rating → gated fixes → commit and PR. Stops once after the plan for your approval, then runs unattended; --auto skips that stop. Expensive — many parallel agents and multiple review passes. Use only when the user explicitly runs /dev-loop or asks for 'the full loop'; for ordinary single-task work use the project's normal path. Run /dev-loop-setup once per repo first."
 ---
 
 # /dev-loop — the virtuous development loop
 
-You are the **Opus orchestrator**. Run the user's request through all six phases in
-order. Do not skip phases. Do not collapse phases into a single pass. The value of the
-loop is the separation of concerns: a planner, an independent implementation army, an
-adversarial reviewer, an independent rater, a gated fixer, and a learning sink.
+You are the orchestrator. Run the request through Phases 1–9 in order. The only early
+exits are the Phase 1 trivial triage and a hard stop you report to the user.
 
-If the user gave no task, ask what to build or fix, then start at Phase 1.
+**By default the loop stops once, after the plan, and waits.** The Phase 3 checkpoint is
+the cheapest quality lever here: a few seconds of human attention on the plan costs less
+than any fix round, and it is the last point where a wrong-direction change is still cheap
+to redirect.
 
----
+**Autonomous mode is opt-in and must be explicit.** Skip the checkpoint only when the user
+says so *in this invocation* — `--auto`, "run it autonomously", "don't stop", "no
+checkpoints" — or when the project profile sets `Checkpoints: none`. Never infer it from
+urgency, from task size, from a deadline, or from a previous autonomous run. In autonomous
+mode every question that would have been asked becomes an assumption recorded in
+`PLAN.md` and repeated in the PR body.
 
-## Step 0 — Read prerequisites and project config
-
-1. **Prerequisites (prefer, don't require):**
-   - `/rails-feature` + `/rails-bugfix` from **@kurenn/roundhouse** drive Phase 2.
-   - `/codex:adversarial-review` from **@openai-codex/codex** drives Phase 3.
-   - If either is missing, use the documented fallback in that phase and note it in the
-     PR. If neither is installed, suggest the user run `/dev-loop-setup` (it checks).
-2. **Project config:** read the project's `CLAUDE.md` for a `## Dev-loop config` block
-   and use its overrides. If absent, use the defaults below and suggest running
-   `/dev-loop-setup` to scaffold one.
-
-   | Knob | Default |
-   |---|---|
-   | Gate | overall ≥ **8.5** AND every axis ≥ 7 |
-   | Base rating axes | correctness, simplicity, test coverage, naming, performance risk, security risk |
-   | Extra rating axes | none (project-declared, e.g. `design-system fidelity`) |
-   | Critical paths | none (project-declared, e.g. `money / auth / KYC` → those axes ≥ 8.5) |
-   | Learnings file | `docs/dev-loop-learnings.md` |
-   | Fix-round cap | 2 |
+If the user gave no task, ask what to build or fix.
 
 ---
 
-## Model assignments (non-negotiable)
+## Step 0 — Resolve environment and config
+
+Run as **one** Bash call (shell state does not persist between calls):
+
+```sh
+ROOT=$(git rev-parse --show-toplevel) || exit 1
+MAIN=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
+[ -n "$MAIN" ] || MAIN=$(git rev-parse --verify -q main >/dev/null && echo main || echo master)
+CODEX_DIR=$(ls -d ~/.claude/plugins/cache/openai-codex/codex/*/ 2>/dev/null | sort -V | tail -1)
+gh auth status >/dev/null 2>&1 && GH=ok || GH=unavailable
+echo "ROOT=$ROOT MAIN=$MAIN GH=$GH CODEX_DIR=${CODEX_DIR:-none}"
+```
+
+Record these; every later phase uses them. Then:
+
+1. **Project profile.** Read the repo's `CLAUDE.md` for a `## Dev-loop config` block —
+   it carries this project's commands, decomposition hints, critical paths and gate.
+   If it is absent, detect what you can from the repo (see the defaults table) and
+   tell the user at the end that `/dev-loop-setup` would make future runs cheaper and
+   more reliable.
+2. **Accelerators (optional, auto-detected).** Neither is required:
+   - **Specialist subagents** — if the profile names subagent types for this stack (e.g.
+     `roundhouse:rails-models` for Rails), use them as unit executors in Phase 4.
+     Detect availability by whether the subagent type appears in your available agent
+     types, not by globbing the plugin cache.
+   - **Codex** — if `CODEX_DIR` is non-empty, it drives Phase 6. Verified against codex
+     **1.0.6**; if the companion script or its flags are missing, fall back silently.
+
+| Knob | Default when the profile is silent |
+|---|---|
+| Install / prepare | detect (`bin/setup`, `npm ci`, `go mod download`, `uv sync`, …) |
+| Test / lint / typecheck / security | detect from the repo; a missing check is *skipped, and said so*, never assumed green |
+| Local config to copy into the worktree | every gitignored file the app needs to boot (`.env*`, `config/master.key`, `*.local.*`) |
+| Checkpoints | plan approval after Phase 3; autonomous only on explicit request |
+| Critical paths | none |
+| Fix-round cap | 2 |
+| Learnings file | `docs/dev-loop-learnings.md` |
+| Telemetry axes | correctness, simplicity, test coverage, clarity, performance, security |
+
+---
+
+## Model assignments
 
 | Phase | Who | Model |
 |---|---|---|
-| 1 Plan & orchestrate | you (this session) | **Opus, maximum reasoning** — think hard before writing the plan |
-| 2 Implement | specialist agents | **Sonnet** (army, parallel) via `/rails-feature` |
-| 3 Adversarial review | Codex | external (`/codex:adversarial-review`) |
-| 4 Rate against plan | a fresh reviewer agent | **Opus** |
-| 5 Fix (gated) | specialist agents | **Sonnet** |
-| 6 Learnings & PR | you | Opus |
+| 1 Triage & frame | you | this session |
+| 2 Plan | one agent | **fable** |
+| 3 Critique → revise | a *fresh* critic, then the planner | **fable** |
+| 4 Execute | unit agents, parallel within a wave | **sonnet** |
+| 5 Mechanical gate | you (repairs by sonnet agents) | — |
+| 6 Adversarial review | Codex, else a fresh agent | external / **fable** |
+| 7 Rate | a fresh, threshold-blind rater | **opus** |
+| 8 Fix | unit agents | **sonnet** |
+| 9 Learnings & ship | you | this session |
 
-When you spawn agents with the Agent tool, pass `model: "sonnet"` for implementation
-and fix agents, and `model: "opus"` for the Phase 4 rater. Roundhouse specialists
-(`roundhouse:rails-*`) are the preferred Sonnet implementers for Rails work.
+Pass these as `model:` on the Agent tool. You **cannot** set your own model — if this
+session is not running a strong model, say so once and continue; the phase models still
+apply to the agents you spawn.
 
----
+## The agent brief contract
 
-## Phase 1 — Plan & orchestrate (Opus, max reasoning)
+Subagents do **not** inherit your context and do **not** inherit your working directory —
+their Bash calls and their Read/Edit/Glob resolve against the repo root, not the
+worktree. Every brief you write in Phases 4, 5 and 8 **must** open with this preamble,
+with the placeholders filled in:
 
-1. **Triage.** Is this trivial (typo, copy edit, single-line config, comment fix,
-   obviously-safe one-file change, pure docs/config)? If yes, tell the user the loop is
-   overkill, make the edit directly, and stop. Everything else continues.
-2. **Refine** the request into a crisp problem statement and acceptance criteria. (If
-   `/prompt-refiner` is installed, use it once here.)
-3. **Create the worktree** off the main branch (never work on it directly):
-   ```sh
-   git worktree add .worktrees/<short-name> -b <feature|fix|chore|refactor>/<branch>
-   cd .worktrees/<short-name>
-   ```
-   Keep the directory name short; the branch name can be longer.
-4. **Write `PLAN.md`** in the worktree. It is the **contract the work is graded against
-   in Phase 4** — be explicit: scope, files/layers touched, data-model and migration
-   impact, any critical-path surface (per project config), test strategy, and the
-   acceptance criteria as a checklist. Follow a sane Rails implementation order:
-   models/migrations → policies → form objects → controllers → services → serializers →
-   views/Stimulus/Tailwind → tests.
-5. **Flag the rigor tier.** If the change touches a project-declared critical path, say
-   so in `PLAN.md` and raise the Phase 5 bar for the relevant axes.
+```
+Work exclusively inside <ABSOLUTE worktree path>. Begin every Bash call by cd-ing there,
+and treat every file path as relative to it. Never read or edit anything under
+<ROOT> outside that worktree — it is a separate checkout of the same repo.
 
-Do **not** implement in this phase. Hand off to Phase 2.
+Files you own (create/edit only these): <explicit list from the plan>
+If your work requires touching a file you do not own, stop and report it instead of
+editing it.
 
-## Phase 2 — Implement (Sonnet army, in parallel)
-
-Delegate implementation — do not write the feature yourself.
-
-- **Feature / multi-layer change:** invoke **`/rails-feature`** with the refined task. It
-  refines once, triages, and dispatches the **Sonnet specialist army** (models,
-  controllers, views, services, jobs, tests) in parallel with TDD red→green and its
-  conditional security/database gates.
-- **Bug with a stack trace, failing test, or reproducible misbehavior:** invoke
-  **`/rails-bugfix`** instead.
-- **Fallback (no roundhouse):** spawn Sonnet agents directly with the Agent tool
-  (`model: "sonnet"`), one per layer in the implementation order above, writing tests
-  first. Note the fallback in the PR.
-- Don't hand-orchestrate individual specialists when roundhouse is present — let the
-  skill triage; over-spawning is the most common failure mode.
-- Confirm the suite is green before review. Never proceed to review on red tests.
-
-## Phase 3 — Adversarial review (Codex)
-
-Challenge the implementation — approach, assumptions, tradeoffs, real-world failure
-modes — not just surface defects. Run it against the branch and **wait** for the result
-(the loop needs the output to rate in Phase 4):
-
-```sh
-CODEX_DIR=$(ls -d ~/.claude/plugins/cache/openai-codex/codex/*/ | sort -V | tail -1)
-node "${CODEX_DIR}scripts/codex-companion.mjs" adversarial-review "--base <main-branch> --wait"
+Your unit: <verbatim excerpt from PLAN.md>
+Done when: <that unit's acceptance criteria>
+Before returning, run: <the profile's test command, scoped to your files>
+Return: what you changed, what you could not do, and anything the plan got wrong.
 ```
 
-(The `/codex:adversarial-review` command is the interactive equivalent; it is marked
-`disable-model-invocation`, so inside this loop call the companion script directly as
-above. For a very large diff, swap `--wait` for `--background`, poll `/codex:status`,
-then collect with `/codex:result` before Phase 4.)
-
-**Fallback (no codex):** spawn a fresh Opus agent (`model: "opus"`) prompted to
-adversarially challenge the approach, assumptions, and tradeoffs — explicitly trying to
-find where the design fails under real-world conditions. Note the fallback in the PR.
-
-Capture the findings verbatim — they feed Phase 4 and Phase 5. Fix nothing in this phase.
-
-## Phase 4 — Rate against the plan (fresh Opus reviewer)
-
-Spawn **one Opus agent** (`model: "opus"`) as an independent rater. Give it: `PLAN.md`,
-the branch diff (`git diff <main-branch>...HEAD`), the test results, and the Phase 3
-findings. It must NOT edit code — it only judges. It returns:
-
-1. A score **1–10 on each axis** (the base axes plus any project-declared extra axes).
-2. An **overall plan-fidelity score (1–10)** — how completely and faithfully the work
-   delivers the Phase 1 plan and acceptance criteria, weighing the Phase 3 findings.
-3. The **single lowest axis** and the most valuable concrete fix for it.
-4. A list of **blocking issues** (adversarial challenges that are real + any axis < 7).
-
-## Phase 5 — Fix (Sonnet, gated)
-
-**Gate (from project config; default):** pass when **overall ≥ 8.5 AND every axis ≥ 7**.
-For changes touching a project-declared critical path, also require the relevant axes
-(typically correctness and security risk) ≥ 8.5.
-
-- If the gate is **met**, go to Phase 6.
-- If **not met**, dispatch **Sonnet agents** (roundhouse specialists where they fit) to
-  fix the blocking issues and lift the lowest axes. Then **re-run Phase 3 and Phase 4**
-  on the updated branch.
-- **Respect the fix-round cap** (default 2). If still below the gate after the last
-  round, stop, write what's blocking to `PLAN.md`, and surface it to the user with the
-  latest scores and the adversarial findings. Never loop indefinitely, and never lower
-  the bar to pass.
-
-## Phase 6 — Capture learnings & ship
-
-1. **Append learnings** to the project's learnings file (default
-   `docs/dev-loop-learnings.md`) — only durable, reusable insight (a non-obvious gotcha,
-   a pattern worth repeating, an adversarial challenge that recurred, a place the plan
-   was wrong). Skip the diary; capture the map. Nothing user-specific or secret. Use the
-   entry format at the top of that file.
-2. **Self-rate summary** — keep the final Phase 4 axis scores for the PR body.
-3. **Open the PR** with `gh pr create`, following the project's PR conventions (from
-   `## Dev-loop config`). The body must include:
-   - **Summary** — what changed and why (1–3 bullets)
-   - **Self-rating** — the final axis scores + overall plan-fidelity score
-   - **Loop trace** — how many fix rounds ran, and the headline adversarial challenge(s)
-   - **Improvement applied** — what the fix pass(es) changed, or follow-ups deferred
-   - **Test plan** — how to verify, including manual steps for UI changes
-   - **Screenshots** — for any visual/UI impact, per the project's PR conventions
-4. Don't leave work uncommitted on the worktree branch.
+Omitting this preamble is the single most common way this loop silently corrupts the
+main checkout.
 
 ---
+
+## Phase 1 — Triage & frame
+
+1. **Trivial?** A typo, a copy edit, a one-line config change, a comment, a single
+   obviously-safe file. If yes: tell the user the loop is overkill, make the edit
+   directly in the main checkout, and stop.
+2. **Size tier.** Estimate the work. *Light* (one or two units, no schema/API change) →
+   run the full loop but with a single execution wave and a fix cap of 1. *Full* →
+   everything below. Say which tier you picked.
+3. **Stack check.** If the repo's language/framework can't be identified at all, say so
+   and stop — every later phase depends on knowing how to build and test it.
+4. Restate the request as a crisp problem statement. Carry it into Phase 2 verbatim.
+
+## Phase 2 — Plan (fable)
+
+**2a — Create and provision the worktree.** Never work on `$MAIN` directly.
+
+```sh
+SLUG=<short-kebab-name>            # directory name; keep it short
+BR=<feature|fix|chore|refactor>/<branch-name>
+WT="$ROOT/.worktrees/$SLUG"
+git worktree add "$WT" -b "$BR" "$MAIN"
+```
+
+- If `$WT` or the branch already exists: if `$WT/LOOP_STATE.md` describes *this* task,
+  resume from the phase it names. Otherwise append `-2`, `-3`… to `SLUG` and `BR` and
+  create a fresh one. Never delete someone else's worktree to make room.
+- **Provision it.** A fresh worktree contains tracked files only, so it usually cannot
+  boot: copy the profile's local-config files from `$ROOT` (e.g. `config/master.key`,
+  `.env*`), then run the profile's install/prepare commands.
+- **Capture a baseline** — run the profile's test, lint, typecheck and security commands
+  now, before any change, and record the results in `LOOP_STATE.md`. Without a baseline
+  you cannot tell a regression from a pre-existing failure.
+- If the baseline cannot be made to run at all, **stop** and report exactly which command
+  failed and what is missing. Do not implement against a broken environment.
+
+**2b — Write `PLAN.md` in the worktree.** Spawn one **fable** agent with the brief
+preamble. `PLAN.md` is the contract everything downstream is graded against and the
+*decomposition* the army executes, so it must contain:
+
+- **Problem & acceptance criteria** — a checklist, each item independently verifiable.
+- **Scope** — explicitly in and explicitly out.
+- **Risk tier** — which project-declared critical paths this touches, if any.
+- **Test strategy** — what gets tested at which level, and what deliberately isn't.
+- **Assumptions** — every open question and the answer being assumed. This section is
+  what the Phase 3 checkpoint exists to surface; in autonomous mode it ships unreviewed,
+  so it must be complete.
+- **Work breakdown into waves.** This is what makes parallel execution safe:
+
+```markdown
+### Wave 1 — <name>
+- **1.1 <unit name>** · owns: `<path/one>`, `<path/two>` · does: <one sentence>
+  · done when: <criterion>
+```
+
+  Rules, non-optional:
+  - Within a wave, unit ownership sets are **disjoint**. Two units that need the same
+    file are one unit.
+  - A wave may depend only on waves before it. Interfaces, schemas, types and shared
+    contracts go in the earliest wave; their consumers come later.
+  - Tests for a unit belong to that unit unless the profile says otherwise.
+
+## Phase 3 — Critique the plan, then revise it
+
+1. Spawn a **fresh fable** agent — a different agent, not the planner. Give it only the
+   original request and `PLAN.md`. It must not see the planner's reasoning. Brief it to
+   attack: wrong problem framing, missing acceptance criteria, ownership collisions
+   between units in the same wave, wave-ordering errors, unstated assumptions,
+   under-tested risk, scope creep, and cheaper approaches that were not considered.
+   It writes `PLAN-CRITIQUE.md`. It must not edit `PLAN.md`.
+2. Hand the critique back to the **planner** agent to revise. The planner either applies
+   each point or records a one-line rebuttal in `PLAN.md`. Silence is not allowed.
+3. One critique round only.
+4. **Checkpoint — present the plan and wait for a decision**, unless autonomous mode was
+   explicitly requested. Show the user, compactly:
+   - the problem statement and the acceptance-criteria checklist
+   - the wave breakdown — unit name and owned paths, one line each
+   - every assumption from `PLAN.md`, and the risk tier
+   - what the critique changed, and anything the planner rebutted
+   - the cost shape — how many units, how many waves, whether Codex will run
+
+   Then ask for **approve**, **revise** (with feedback), or **abort**. On revise, hand the
+   feedback to the planner, re-present, and repeat at most twice before asking for a
+   final decision. On abort, remove the worktree and branch you created, then stop.
+
+   In autonomous mode, print that same summary without stopping — the run stays auditable
+   even though nobody gated it.
+
+## Phase 4 — Execute (sonnet, parallel within waves)
+
+Do not implement anything yourself.
+
+- Walk the waves **in order**. For each wave, spawn one **sonnet** agent per unit, all in
+  a single message so they run concurrently, each with the brief contract preamble and
+  only its own owned files.
+- If the profile names specialist subagent types for this stack, pass the matching one as
+  `subagent_type` (e.g. a model/migration unit → `roundhouse:rails-models`). This gives
+  you their expertise while keeping *your* plan, *your* ownership boundaries and *your*
+  wave ordering — do not delegate the whole feature to another orchestrating skill, which
+  would re-plan the work against a different contract.
+- **After each wave**, run the profile's test command before starting the next. A broken
+  wave 1 makes every downstream wave garbage.
+- If an agent reports it needed a file it did not own, resolve the overlap yourself,
+  update `PLAN.md`, and note the amendment — do not let two agents fight over a file.
+
+## Phase 5 — Mechanical gate
+
+Objective checks, run in the worktree, **before** spending anything on review:
+
+install/build · tests · lint · typecheck · security scan — whichever the profile defines.
+
+- Compare against the Phase 2 baseline. New failures block; pre-existing ones don't.
+- Any check the profile doesn't define is **skipped and reported as skipped**.
+- If red: dispatch **sonnet** agents to repair, then re-run. This is repair, not a fix
+  round — it does not consume the fix-round cap, but cap it at 3 attempts and stop if the
+  same failure survives all three.
+- Nothing proceeds to Phase 6 on red.
+
+## Phase 6 — Adversarial review
+
+Challenge the approach, assumptions and real-world failure modes — not just defects.
+Run as one Bash call from inside the worktree, with `timeout: 600000`:
+
+```sh
+cd "$WT" && CODEX_DIR=$(ls -d ~/.claude/plugins/cache/openai-codex/codex/*/ 2>/dev/null | sort -V | tail -1) \
+  && [ -n "$CODEX_DIR" ] \
+  && node "${CODEX_DIR}scripts/codex-companion.mjs" adversarial-review "--base $MAIN --wait"
+```
+
+For a large diff (roughly: more than a few files), run that same command with the Bash
+tool's `run_in_background: true` — the script's own `--background` flag is parsed but
+ignored for reviews — then poll and collect with the companion's subcommands:
+
+```sh
+node "${CODEX_DIR}scripts/codex-companion.mjs" status --wait
+node "${CODEX_DIR}scripts/codex-companion.mjs" result <job-id>
+```
+
+Do **not** use `/codex:adversarial-review`, `/codex:status` or `/codex:result` — all three
+are `disable-model-invocation: true` and you cannot call them.
+
+**Fallback (no codex, or the script is missing/changed):** spawn a fresh **fable** agent,
+given the worktree path, `PLAN.md` and `git diff $MAIN...HEAD`, briefed to find where the
+design fails under real-world conditions. Note in the PR that the review was in-family
+and therefore weaker.
+
+Write the findings verbatim to `REVIEW-round-N.md` in the worktree. Fix nothing here.
+
+## Phase 7 — Rate (fresh opus, threshold-blind)
+
+Spawn one **opus** agent per round. It must not edit code. It has never seen this skill,
+so give it everything it needs. Do **not** tell it the gate. Use this brief:
+
+```
+You are an independent reviewer. You did not write this code. Judge it; do not change it.
+
+Inputs: PLAN.md (the contract), PLAN-CRITIQUE.md, the diff of <MAIN>...HEAD in
+<worktree path>, the mechanical check results, and REVIEW-round-N.md.
+If the diff exceeds ~2000 lines, read the files in the worktree yourself using
+`git diff --stat` as your map rather than working from a pasted diff.
+
+Return exactly these sections:
+
+1. ACCEPTANCE — each acceptance criterion from PLAN.md marked met / partial / unmet,
+   with the evidence (file:line or test name). Every unmet criterion is BLOCKING.
+2. FINDINGS — every issue, each with severity:
+   BLOCKING = incorrect behavior, data loss, a security hole, or an unmet acceptance
+     criterion. Ships a defect.
+   MAJOR = a real problem that does not block shipping: an untested branch on a risky
+     path, a significant performance risk, avoidable complexity that will cost later.
+   MINOR = style, naming, nits.
+   For each: file:line, what is wrong, and the concrete fix. Judge each Phase 6
+   adversarial challenge as real or not, with reasoning.
+3. SCORES — 1-10 on: correctness, simplicity, test coverage, clarity, performance,
+   security (plus any extra axes listed below). 10 is always best: a 10 on security
+   means no security concern. These are telemetry, not a pass/fail judgment — score
+   honestly rather than charitably.
+4. PLAN DRIFT — where the implementation departed from PLAN.md, and whether each
+   departure was justified.
+
+Extra axes: <from the profile, or "none">
+Critical paths in this change: <from the profile, or "none">
+```
+
+Write the result to `RATING-round-N.md`.
+
+## Phase 8 — Gate & fix
+
+**The gate is mechanical, not numeric.** It passes when all three hold:
+
+1. Phase 5 is green against the baseline (or its failures are pre-existing).
+2. **Zero BLOCKING findings.**
+3. Every MAJOR finding is either fixed or waived with a one-line written reason.
+
+The 1–10 scores never gate anything — they go in the PR body as telemetry. This is
+deliberate: an unanchored self-report clustered in the 7–9 band is not a control.
+
+- **Gate met** → Phase 9.
+- **Not met** → dispatch **sonnet** agents (brief contract preamble, ownership from the
+  plan) to fix the BLOCKING findings first, then the MAJORs. Then **re-run Phase 5**, and
+  re-run Phase 7 as a **delta judgment**: give the new rater `RATING-round-N.md` plus the
+  diff since the fix, and ask it to verify each prior finding was actually addressed and
+  to flag anything the fix broke. Delta judgment is better calibrated and far cheaper
+  than re-rating from scratch.
+- Re-run Phase 6 on a fix round only if the fix touched a critical path or changed the
+  approach; otherwise the delta judgment is enough.
+- **Respect the fix-round cap** (default 2). If BLOCKING findings survive the last round,
+  stop: write what is blocking into `PLAN.md` and `LOOP_STATE.md`, still run Phase 9's
+  learnings capture, and report to the user with the surviving findings. Never loosen
+  the gate to pass, and never reclassify a BLOCKING finding as MAJOR to get through it.
+
+## Phase 9 — Learnings & ship
+
+1. **Append learnings** to the profile's learnings file **inside the worktree** (so they
+   ship with the PR and do not dirty the main checkout). Insert newest-first, directly
+   below the `## Entry format` heading. Create the file with the standard header if it
+   does not exist. Capture only durable, reusable insight — a non-obvious gotcha, a
+   pattern worth repeating, a recurring adversarial challenge, a place the plan was
+   wrong. Map, not diary. Nothing user-specific or secret. **Run this step even when the
+   loop stopped at the gate** — failed runs teach the most.
+2. **Commit.** Nothing before this phase commits, so the worktree is dirty. Stage
+   everything and commit with a conventional message referencing the plan.
+3. **Push and open the PR** — only if `GH=ok` from Step 0:
+   ```sh
+   cd "$WT" && git push -u origin "$BR" && gh pr create --base "$MAIN" ...
+   ```
+   If `gh` is unavailable or unauthenticated, stop at the commit, and tell the user the
+   branch name and the exact push + PR commands to run. Do not fail the loop over it.
+4. **PR body:**
+   - **Summary** — what changed and why (1–3 bullets)
+   - **Independent rating** — the axis scores as telemetry, plus the finding counts by
+     severity and any MAJOR waivers with their reasons
+   - **Loop trace** — fix rounds run, headline adversarial challenge(s), and any
+     degraded phases (in-family review, skipped mechanical checks, no specialist agents)
+   - **Improvement applied** — what the fix rounds changed; follow-ups deferred
+   - **Test plan** — how to verify, including manual steps for UI changes
+   - **Assumptions** — the ones from `PLAN.md`, marked as approved at the Phase 3
+     checkpoint or shipped unreviewed under autonomous mode
+5. Report the worktree path to the user. Do not remove it — they may still want it.
+
+---
+
+## Artifacts & resumability
+
+Everything the loop learns lives in files in the worktree, not in your context:
+
+| File | Written by |
+|---|---|
+| `PLAN.md` | Phase 2, amended in 4 and 8 |
+| `PLAN-CRITIQUE.md` | Phase 3 |
+| `REVIEW-round-N.md` | Phase 6 |
+| `RATING-round-N.md` | Phase 7 |
+| `LOOP_STATE.md` | every phase: task, current phase, round, baseline, gate status |
+
+Update `LOOP_STATE.md` at each phase boundary. If the loop is interrupted, a later run
+reads it and resumes instead of starting over.
 
 ## Guardrails
 
-- **Cost is real.** A parallel army + iterative fix loop + Codex + an Opus rater is
-  expensive. Don't run the full loop on trivial work (Phase 1 triage catches this), and
-  respect the fix-round cap.
-- **Never lower the gate to pass.** If the gate is genuinely unreachable in scope, that's
-  a Phase 5 escalation, not a reason to soften the threshold.
-- **The plan is the contract.** If implementation reveals the plan was wrong, update
-  `PLAN.md` and say so in the rating — don't silently drift.
+- **Cost is real, and it compounds.** Parallel army × review passes × fix rounds. The
+  Phase 1 tier decision and the fix-round cap are the two brakes — use both.
+- **Never edit the main checkout after Phase 2.** Every path is worktree-relative.
+- **The plan is the contract.** If implementation proves it wrong, amend `PLAN.md`,
+  record the amendment, and make sure the rating judges the amendment too. Amending the
+  contract to make the work look faithful is the one way to cheat this loop.
