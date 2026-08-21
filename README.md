@@ -65,13 +65,14 @@ Auto-detected, neither required:
 /plugin install roundhouse@kurenn    # phase 4: Rails specialist subagents
 ```
 
-Without codex the review is in-family and labelled weaker in the PR. Without `gh` the loop
-commits and pushes, then hands you the PR command.
+Without codex, phase 6 falls back to a fresh in-family agent — it shares training and blind
+spots with the implementers, so it is materially weaker, and the PR says so. Without a
+GitHub remote the loop still commits and pushes, then hands you the PR command.
 
 ## What the benchmark found
 
-Full method and raw numbers in [`bench/RESULTS.md`](bench/RESULTS.md) — 15 full loop runs,
-60 gate replays, 24 blind gradings, hidden acceptance suites.
+Full method and raw numbers in [`bench/RESULTS.md`](bench/RESULTS.md) — 17 full loop runs,
+60 gate replays, 24 blind gradings, hidden acceptance suites, all on a pinned Rails app.
 
 **For it**
 
@@ -91,6 +92,11 @@ Full method and raw numbers in [`bench/RESULTS.md`](bench/RESULTS.md) — 15 ful
   instruction changed that almost not at all: the spend is the phases, not the prose.
 - On blind-graded code quality it reaches **parity**, not superiority. You are buying
   process guarantees, not better code.
+
+**Verified at release** — 0.2.6 passes 8/8 mechanical assertions on both regression runs.
+Its coverage floor is carried over from an ablation that measured it, not from a blind
+grading of 0.2.6 itself, and cost did not improve: $13.40 ± 1.35 against 0.2.4's
+$11.44 ± 0.21, which the spreads cannot cleanly separate from run-to-run variance.
 
 **Not established** — everything above is one Rails repo and two tasks. The stack-agnostic
 claim is designed for but unmeasured, and no result here should be read as holding on a Go
