@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Entry point for the OpenSOP harness.
+#
+#   harness/bin/dev-loop "add cursor pagination to the projects API"
+#   harness/bin/dev-loop --auto "…"          # no plan checkpoint
+#   harness/bin/dev-loop --profile p.json "…"
+#
+# --auto *removes* the approval step rather than skipping it. The local engine has no
+# condition evaluator, so a skip is not available — but the removal is the better design
+# anyway: a run either has a checkpoint in its receipts or visibly does not, and no flag
+# buried in the inputs can make an unattended run look supervised.
+set -uo pipefail
+HARNESS="$(cd "$(dirname "$0")/.." && pwd)"
+PROC="$HARNESS/dev-loop.sop.json"
+AUTO=false; PROFILE=""; ARGS=()
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --auto) AUTO=true; shift ;;
+    --profile) PROFILE="$2"; shift 2 ;;
+    -h|--help) sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) ARGS+=("$1"); shift ;;
+  esac
+done
+[ ${#ARGS[@]} -gt 0 ] || { echo "usage: dev-loop [--auto] [--profile f.json] <task>" >&2; exit 2; }
+command -v opensop >/dev/null || { echo "opensop not on PATH — see harness/README.md" >&2; exit 2; }
+
+RUN_PROC="$PROC"
+if [ "$AUTO" = true ]; then
+  RUN_PROC="$(mktemp -t dev-loop-auto-XXXX.sop.json)"
+  trap 'rm -f "$RUN_PROC"' EXIT
+  # Generated, never committed: one source of truth for the phase sequence.
+  jq '.name = "dev-loop-auto"
+      | .description = "Autonomous variant — the plan checkpoint is absent, not skipped. " + .description
+      | .steps |= map(select(.id != "plan-approval"))' "$PROC" > "$RUN_PROC"
+fi
+
+set -- opensop run "$RUN_PROC" --input task="${ARGS[*]}"
+[ -n "$PROFILE" ] && set -- "$@" --input profile="$(jq -c . "$PROFILE")"
+
+# stdin is closed deliberately: the step scripts must never block waiting on it.
+exec "$@" < /dev/null
