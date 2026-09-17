@@ -1,0 +1,177 @@
+{
+  "opensop": "0.6",
+  "name": "dev-loop",
+  "version": "0.3.0",
+  "description": "The dev-loop phase skeleton as an OpenSOP process. Sequencing, the plan checkpoint, the early exits and the severity gate are mechanical and receipted; what each phase does still lives in skills/dev-loop/SKILL.md, which every step script reads. Expensive: many parallel agents and multiple review passes.",
+  "sop": {
+    "source": "https://github.com/kurenn/dev-loop",
+    "tags": ["code-review", "quality-gate", "orchestration", "worktree", "agents"]
+  },
+  "inputs": [
+    {
+      "name": "task",
+      "type": "string",
+      "required": true,
+      "description": "The feature or bug to run through the loop."
+    },
+    {
+      "name": "profile",
+      "type": "object",
+      "default": {},
+      "description": "The project's Dev-loop config: install/test/lint/typecheck/security/coverage commands, critical_paths, axes. A command left unset is skipped and reported as skipped, never assumed green."
+    },
+    {
+      "name": "models",
+      "type": "object",
+      "default": {
+        "triage": "opus",
+        "plan": "fable",
+        "critique": "fable",
+        "apply": "fable",
+        "execute": "sonnet",
+        "repair": "sonnet",
+        "review": "fable",
+        "rate": "opus",
+        "fix": "sonnet",
+        "ship": "sonnet"
+      },
+      "description": "Per-phase model assignments, matching the table in SKILL.md."
+    }
+  ],
+  "outputs": {
+    "worktree": { "from": "steps.ship.outputs.worktree" },
+    "branch": { "from": "steps.ship.outputs.branch" },
+    "pr_url": { "from": "steps.ship.outputs.pr_url" },
+    "blocking": { "from": "steps.fix.outputs.blocking" },
+    "gate_met": { "from": "steps.fix.outputs.gate_met" }
+  },
+  "steps": [
+    {
+      "id": "resolve-env",
+      "name": "Step 0 — resolve environment",
+      "type": "automated",
+      "run": "steps/resolve-env.sh",
+      "description": "Repo root, base branch, gh availability, codex presence, project profile."
+    },
+    {
+      "id": "triage",
+      "name": "Phase 1 — triage & frame",
+      "type": "automated",
+      "run": "steps/triage.sh",
+      "description": "Trivial check, size tier, unit count, problem statement.",
+      "exit_when": "outputs.trivial == true",
+      "exit_outputs": {
+        "outcome": "trivial",
+        "reason": "The loop is overkill for this change. Make the edit directly in the main checkout."
+      }
+    },
+    {
+      "id": "worktree",
+      "name": "Phase 2a — worktree, provisioning, baseline",
+      "type": "automated",
+      "run": "steps/worktree.sh",
+      "effects": "creates a git worktree and a branch",
+      "description": "A fresh worktree holds tracked files only, so it usually cannot boot until the gitignored config is copied in. The baseline is captured before any change.",
+      "exit_when": "outputs.baseline_ok == false",
+      "exit_outputs": {
+        "outcome": "baseline_unrunnable",
+        "reason": "The test baseline could not be made to run. Nothing is implemented against a broken environment."
+      }
+    },
+    {
+      "id": "plan",
+      "name": "Phase 2b — write PLAN.md",
+      "type": "automated",
+      "run": "steps/plan.sh",
+      "description": "The work contract: acceptance criteria, scope, risk tier, test strategy, assumptions, and the wave breakdown with disjoint per-unit file ownership."
+    },
+    {
+      "id": "critique",
+      "name": "Phase 3a — critique the plan",
+      "type": "automated",
+      "run": "steps/critique.sh",
+      "description": "A fresh critic that never saw the planner's reasoning and may not edit PLAN.md."
+    },
+    {
+      "id": "apply-critique",
+      "name": "Phase 3b — answer every critique point",
+      "type": "automated",
+      "run": "steps/apply-critique.sh",
+      "description": "Each point gets an edit or a written rebuttal. Silence is not allowed."
+    },
+    {
+      "id": "plan-approval",
+      "name": "Phase 3c — plan checkpoint",
+      "type": "approval",
+      "description": "The cheapest quality lever in the loop: a few seconds of human attention on the plan costs less than any fix round, and it is the last point where a wrong-direction change is still cheap to redirect. Resume with: opensop submit <run_id> plan-approval --output decision=approve. Autonomous mode removes this step entirely rather than skipping it — see bin/dev-loop --auto — so a run either has a checkpoint in its receipts or visibly does not.",
+      "outputs": [
+        { "name": "decision", "type": "enum", "values": ["approve", "abort"] },
+        { "name": "feedback", "type": "string" }
+      ],
+      "exit_when": "outputs.decision == 'abort'",
+      "exit_outputs": {
+        "outcome": "aborted_at_plan",
+        "reason": "Aborted at the plan checkpoint. The worktree and branch are left in place."
+      }
+    },
+    {
+      "id": "execute",
+      "name": "Phase 4 — execute the waves",
+      "type": "automated",
+      "run": "steps/execute.sh",
+      "effects": "writes code into the worktree",
+      "description": "Walks the waves in order, fans out one agent per unit, collects a four-field handoff from each, and checks every changed path against the wave's declared ownership. A failed unit is re-dispatched once, then the run stops.",
+      "exit_when": "outputs.executed_clean == false",
+      "exit_outputs": {
+        "outcome": "unit_failed",
+        "reason": "A unit failed twice, or a wave went red. Stopped before the dependent wave rather than improvising."
+      }
+    },
+    {
+      "id": "gate",
+      "name": "Phase 5 — mechanical gate",
+      "type": "automated",
+      "run": "steps/gate.sh",
+      "description": "Install, tests, lint, typecheck, security and the coverage floor, compared against the Phase 2 baseline. Repairs are capped at 3 and do not consume the fix-round cap.",
+      "exit_when": "outputs.green == false",
+      "exit_outputs": {
+        "outcome": "gate_red",
+        "reason": "Mechanical checks are red against the baseline after repair attempts. Nothing proceeds to a paid review on red."
+      }
+    },
+    {
+      "id": "review",
+      "name": "Phase 6 — adversarial review",
+      "type": "automated",
+      "run": "steps/review.sh",
+      "description": "Codex when installed, a fresh in-family agent otherwise. The Light tier skips the paid review unless a critical path is touched; that check is inside the step rather than a `condition`, because the local engine has no condition evaluator. The PR records either degradation."
+    },
+    {
+      "id": "rate",
+      "name": "Phase 7 — independent rating",
+      "type": "automated",
+      "run": "steps/rate.sh",
+      "description": "A fresh rater, told nothing about what passes. Emits findings by severity plus 1-10 axis scores as telemetry."
+    },
+    {
+      "id": "fix",
+      "name": "Phase 8 — gate & fix",
+      "type": "automated",
+      "run": "steps/fix.sh",
+      "description": "Passes on zero BLOCKING with every MAJOR fixed or waived on one of three enumerated grounds. The scores gate nothing. Fix rounds are capped by tier, and the cap is never loosened to pass.",
+      "exit_when": "outputs.gate_met == false",
+      "exit_outputs": {
+        "outcome": "blocked",
+        "reason": "BLOCKING findings survived the last fix round. Stopped rather than lowering the bar; the worktree holds the plan, ratings and reviews."
+      }
+    },
+    {
+      "id": "ship",
+      "name": "Phase 9 — learnings & ship",
+      "type": "automated",
+      "run": "steps/ship.sh",
+      "effects": "commits, pushes a branch, and may open a pull request",
+      "description": "Captures learnings, commits, pushes whenever a remote exists, and opens the PR only when GitHub is reachable."
+    }
+  ]
+}
