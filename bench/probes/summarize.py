@@ -36,25 +36,43 @@ for dp, _, files in os.walk(ROOT):
                 skipped.add(m.group(1))
 
     gate = "unscored"
+    incomplete = False
     rp = os.path.join(dp, "results.json")
     if os.path.exists(rp):
         try:
-            gate = (json.load(open(rp)).get("gate") or {}).get("disposition", "unscored")
+            res = json.load(open(rp))
+            gate = (res.get("gate") or {}).get("disposition", "unscored")
+            # A loop that reached no gate verdict and committed nothing did not finish, and a
+            # run that did not finish is evidence about the environment, not about the skill.
+            # Measured: an API rate limit killed a run at Phase 2 and it was scored as an arm
+            # that carried a defect and declined to ship, which flatters the arm twice over.
+            committed = (res.get("assertions", {}).get("A4_work_committed") or {}).get("pass")
+            incomplete = gate in ("unknown", "unscored") and committed is False
         except Exception:
             pass
     ran = re.search(r"(\d+) runs, (\d+) assertions", out)
     runs.append(dict(flow=meta["flow"], task=meta["task"], idx=meta["idx"],
                      present=present, skipped=skipped, gate=gate,
+                     incomplete=incomplete, exit_code=meta.get("exit_code"),
                      ok=bool(ran)))
 
 if not runs:
     sys.exit(f"no probed runs under {ROOT} — run bench/probes/run-probes.sh first")
 
 broken = [r for r in runs if not r["ok"]]
+aborted = [r for r in runs if r["incomplete"]]
+runs = [r for r in runs if not r["incomplete"]]
+if not runs:
+    sys.exit("every probed run was incomplete — nothing to compare")
+
 ids = sorted({d for r in runs for d in r["present"] | r["skipped"]},
              key=lambda s: int(s[1:]))
 
 print(f"probed runs: {len(runs)}" + (f"   ({len(broken)} produced no test output)" if broken else ""))
+if aborted:
+    print("excluded as incomplete — no gate verdict and nothing committed, so the run says")
+    print("nothing about the skill: " +
+          ", ".join(f"{r['flow']}/{r['task']}-{r['idx']} (exit {r['exit_code']})" for r in aborted))
 print("\na defect that SHIPPED is one present in a run whose gate came back met\n")
 
 groups = collections.defaultdict(list)

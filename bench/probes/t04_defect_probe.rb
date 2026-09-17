@@ -122,7 +122,12 @@ class T04DefectProbe < ActionDispatch::IntegrationTest
   test "D6 negative per_page falls back rather than emptying the page" do
     seed(30)
     get "/api/v1/projects", params: { per_page: "-5" }
-    n = (records_in(json) || []).size
-    assert n.positive?, "DEFECT D6: per_page=-5 returned an empty page"
+    # A run that never built the endpoint 404s here, and `(records_in || []).size` would read
+    # that absence as zero records and report the defect. Measured: a run killed by an API
+    # rate limit at Phase 2 was scored as carrying a major defect it had not had time to
+    # write. Absence of the endpoint is not evidence about this defect, so skip.
+    recs = records_in(json)
+    skip "endpoint absent (status #{response.status}) — nothing to say about this defect" if recs.nil?
+    assert recs.size.positive?, "DEFECT D6: per_page=-5 returned an empty page"
   end
 end
