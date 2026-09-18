@@ -1,5 +1,93 @@
 # Changelog
 
+## 0.3.0
+
+Four changes to how information moves between the agents, from reading Cursor's *Towards
+self-driving codebases* against this skill. That harness optimises throughput across
+hundreds of agents over a week; this one optimises a guarantee on a single change, so most
+of what it removed — the judge, the integrator, per-commit correctness, the upfront plan —
+is load-bearing here and stays. What survives the change of regime is smaller.
+
+**Measured at Tier 1, 10 runs, two tasks** — pre-registered in `bench/PLAN-v0.3.md` before
+the run, results in `bench/RESULTS.md`, pinned arm in `bench/flows/v0.3/`. Every mechanical
+assertion passes on both arms and cost is flat (+7.6% on one task, −12.3% on the other).
+**Nothing in this matrix separates the two arms on quality.** v0.2.6 found zero MAJOR
+findings in five runs and v0.3 found one in each run of the harder task, but tracing that
+gap to its source dissolves it: both arms' raters detect the one real defect at comparable
+rates and both call it MINOR, the single BLOCKING was a genuine 500 in a run whose code was
+worse, and the run that blocked did so over an issue measured at 0.76 ms. That last one is
+closer to C4's pre-registered *failure* mode — over-fixing — than to a catch. C4 itself
+stays unmeasured, since v0.2.6 never found a MAJOR and so never faced a waiver decision.
+
+Two instruments added afterwards do separate them. A **waiver replay** isolates the gate on a
+fixed corpus and is reported below. **Shipped-defect probes** ask the one question nothing
+else here asked — did something broken reach main — and found v0.2.6 shipping a defect in
+2 of 3 runs against v0.3's 1 of 3. Both arms *write* defects at the same rate; the difference
+is entirely that v0.3's gate blocked a run. That is a real outcome difference and a small
+one: n=3, and both defect classes are minor by the probes' own labelling. The probes exist
+because this defect was originally found by reading controllers by hand while every Tier 1
+assertion and all 8 hidden acceptance tests passed on the branch carrying it.
+
+- **Unit agents return a four-field handoff** — CHANGED, NOT DONE, DEVIATIONS, CONCERNS —
+  and the orchestrator must answer it. The brief already asked for roughly this
+  information, but nothing in the loop consumed it, so an implementer writing "the plan was
+  wrong here" went nowhere. Handoffs are now collected into `HANDOFFS.md`, every deviation
+  and concern gets an amendment or a written rebuttal before the next wave, and the rater
+  receives them labelled as claims to verify rather than as evidence. Handoffs travel up
+  only; the failed experiment this avoids is worker-to-worker coordination.
+- **A failed unit is re-dispatched once, then the loop stops.** Previously undefined: the
+  skill ran the suite after each wave and said nothing about red, so the orchestrator
+  improvised, and improvising here means finishing the unit itself — the exact pathology of
+  an executor holding too many roles. Re-planning around the failure stays the user's call.
+- **`LOOP_STATE.md` is rewritten, not appended**, to a fixed schema under ~40 lines with a
+  `Trace` line. It is the one artifact that has to survive a context compaction intact, and
+  a diary buries the resume path in its own history.
+- **MAJOR waivers are restricted to three enumerated grounds** — declared out of scope,
+  pre-existing on main, or arguing against an assumption, scope decision or resolved
+  critique point `PLAN.md` records — and in autonomous mode nothing on a critical path may
+  be waived at all. The orchestrator is simultaneously the party under cost pressure and the
+  party deciding what to waive, which is the one place in this loop where the judge and the
+  executor are the same agent. Constraining it follows the pattern the rest of this changelog
+  keeps rediscovering: guarantees expressed as checks hold, guarantees expressed as judgement
+  trade away.
+
+  The third ground originally read "contradicts an assumption the **Phase 3 checkpoint
+  approved**", and the waiver replay showed that wording was inert: the checkpoint never
+  fires in an autonomous run, so nothing is ever approved and the ground was unavailable in
+  every run of every benchmark here. It accounted for **the entire over-fixing rate** — the
+  gate fixing findings that merely disagreed with a decision it had already written down.
+  Keying it to the plan's record instead took over-fixing from 45% to 0%, at the cost of one
+  finding that should not have been waivable. See `bench/waivers/`.
+- **A MAJOR can now be rebutted, not only fixed or waived** — when it is factually wrong, with
+  evidence: a probe, a cited line, or documented framework behaviour. Disagreement and
+  "the severity is overstated" are not rebuttals. Raters are wrong sometimes, and the
+  three-grounds gate gave the orchestrator no way to say so, leaving it to implement fixes it
+  believed were pointless; measured, that is what it did. This path is **untested** — the
+  waiver corpus contains no wholly-false finding to exercise it.
+
+Benchmark harness: three new Tier 1 assertions (A10 handoffs collected, A11 handoffs
+answered, A12 state rewritten), applicability-gated on each arm's own skill body so an arm
+is never marked down for omitting something it never claimed. `HANDOFFS.md` added to A9's
+loop-artifact list, without which the new arm would fail its own ownership check.
+
+Two scoring bugs were found mid-matrix and fixed. A4–A6 scored a run that stopped at a
+blocked gate identically to one that failed to commit, which penalised the arm whose gate
+is strictest for the gate working; they are now withheld on a blocked gate, each run
+records a `gate` disposition, and **A14** checks the inverse — a blocked gate that pushes
+anyway. A9's `covered()` honoured a glob only in trailing position, so a unit declaring
+`test/controllers/api/v1/*_test.rb` was scored as violating the path it had just declared.
+`bench/tier1/rescore.sh` re-runs every run through the identical final version and keeps
+the original score as `results-asrun.json`. Every false negative these fixes corrected fell
+on v0.3, which is the same-author confound at its sharpest and is flagged as such in
+`bench/RESULTS.md`.
+
+Two new harnesses. `bench/waivers/` replays a fixed rating through different gate texts to
+isolate waiver behaviour, which is how the inert third ground was caught. `bench/probes/`
+runs adversarial checks against every finished branch and separates a defect that was
+*carried* from one that *shipped* — a run that wrote a defect and blocked is the loop
+working, and every other view in this harness collapsed those into the same row. Neither
+needs model calls.
+
 ## 0.2.6
 
 - **Coverage floor moved into the mechanical gate.** 0.2.5 protected test rigour with a

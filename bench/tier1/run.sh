@@ -88,10 +88,14 @@ START=$(date +%s)
 RC=$?
 END=$(date +%s)
 
-python3 - "$RUNDIR" "$FLOW" "$TASK" "$IDX" "$MODEL" "$RC" "$((END-START))" <<'PY'
+# flow_dir is recorded so assert.py can decide which assertions apply by reading the arm's
+# own skill body, the same way the --auto detection above does, rather than matching
+# version strings. An arm is never marked down for not doing something it never claimed.
+python3 - "$RUNDIR" "$FLOW" "$TASK" "$IDX" "$MODEL" "$RC" "$((END-START))" "$FLOWDIR" <<'PY'
 import json, sys
-d, flow, task, idx, model, rc, secs = sys.argv[1:8]
+d, flow, task, idx, model, rc, secs, flowdir = sys.argv[1:9]
 json.dump({"flow": flow, "task": task, "idx": int(idx), "model": model,
+           "flow_dir": flowdir,
            "exit_code": int(rc), "wall_seconds": int(secs),
            "autonomous_flag": None,
            "note": "arms documenting a plan checkpoint run with --auto; the checkpoint cannot be exercised headless"},

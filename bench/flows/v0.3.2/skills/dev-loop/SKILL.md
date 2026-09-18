@@ -384,30 +384,17 @@ Write the result to `RATING-round-N.md`.
 
 1. Phase 5 is green against the baseline (or its failures are pre-existing).
 2. **Zero BLOCKING findings.**
-3. Every MAJOR finding is fixed, waived, or rebutted — each with a one-line written reason.
+3. Every MAJOR finding is either fixed or waived with a one-line written reason.
 
-**A MAJOR may be waived only on one of three grounds**, and the waiver must name which and
-cite the line it rests on: it falls in what `PLAN.md` declared out of scope; it is
-pre-existing on `$MAIN` and this change does not touch it; or it argues against an
-assumption, scope decision or resolved critique point that `PLAN.md` **records** — cite it by
-its identifier. The ground is the plan's record, not who signed it. Measured, keying this to
-checkpoint approval made the ground unavailable in every autonomous run — the checkpoint
-never fires there, so nothing is ever "approved" — and the loop paid for it by fixing
-findings that only disagreed with a decision it had already made and written down. That was
-the entire over-fixing rate in the waiver replay.
-
-**A MAJOR is rebutted when it is factually wrong**, and only then. A rebuttal carries
-evidence: a probe, a cited line, or documented framework behaviour that contradicts the
-finding. "The severity is overstated" is not a rebuttal, and neither is disagreement — both
-mean fix it. Raters are wrong sometimes, and a gate with no way to say so leaves the
-orchestrator either implementing a fix it knows is pointless or claiming a ground that does
-not apply; measured, it did the first.
-
+**A MAJOR may be waived only on one of three grounds**, and the waiver must name which:
+it falls in what `PLAN.md` declared out of scope; it is pre-existing on `$MAIN` and this
+change does not touch it; or it argues against an assumption or scope decision that
+`PLAN.md` records. The ground is the plan's record, not who signed it.
 Anything else is fixed. The enumeration exists because you are simultaneously the party
 under cost pressure and the party deciding what to waive — the one place in this loop where
 the judge and the executor are the same agent, and the place a fix round is cheapest to
 talk yourself out of. **In autonomous mode, nothing on a project-declared critical path may
-be waived or rebutted at all**: no human approved the assumptions that run is shipping under.
+be waived at all**: no human approved the assumptions that run is shipping under.
 
 The 1–10 scores never gate anything — they go in the PR body as telemetry. This is
 deliberate: an unanchored self-report clustered in the 7–9 band is not a control.
@@ -457,8 +444,8 @@ deliberate: an unanchored self-report clustered in the 7–9 band is not a contr
 4. **PR body:**
    - **Summary** — what changed and why (1–3 bullets)
    - **Independent rating** — the axis scores as telemetry, plus the finding counts by
-     severity, every MAJOR waiver with its reason and which of the three grounds it claimed,
-     and every rebuttal with the evidence it rested on
+     severity and every MAJOR waiver with its reason and which of the three grounds it
+     claimed
    - **Loop trace** — the `Trace` line from `LOOP_STATE.md`: fix rounds run, headline
      adversarial challenge(s), unit re-dispatches and ownership violations, and any
      degraded phases (in-family review, skipped mechanical checks, no specialist agents)
@@ -496,7 +483,7 @@ Phase: <n — name>   Fix round: <n of cap>
 Amendments & rebuttals: <one line each, from ownership checks and handoffs>
 Degraded: <in-family review | skipped checks | no specialist agents | none>
 Trace: <per phase — wall clock, agents spawned, repair attempts, ownership violations,
-        findings by severity, waivers and their grounds, rebuttals and their evidence>
+        findings by severity, waivers and their grounds>
 Gate: <green | blocked by …>
 ```
 

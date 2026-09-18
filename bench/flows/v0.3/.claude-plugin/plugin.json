@@ -1,0 +1,6 @@
+{
+  "name": "dev-loop",
+  "version": "0.0.0",
+  "description": "Benchmark arm: dev-loop v0.3, pinned. Same /dev-loop command as the other arms; differs from v0.2.6 only in four changes — four-field unit handoffs the orchestrator must answer, a re-dispatch-once-then-stop path for a failed unit, LOOP_STATE.md rewritten to a fixed schema rather than appended, and MAJOR waivers restricted to three enumerated grounds.",
+  "skills": "./skills"
+}

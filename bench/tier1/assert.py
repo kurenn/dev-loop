@@ -7,7 +7,7 @@ and labelled as such in the output: A7 (ordering) and A9 (ownership conformance)
 reconstructed from the transcript and from PLAN.md prose, so treat them as signal, not
 proof. See bench/README.md.
 """
-import json, os, re, subprocess, sys
+import fnmatch, json, os, re, subprocess, sys
 
 RUN = os.path.abspath(sys.argv[1])
 APP = os.path.join(RUN, "app")
@@ -191,7 +191,8 @@ elif wt:
         declared |= set(re.findall(r"`([\w./*-]+)`", clause))
 
     # Artifacts the loop authors by design are never "outside ownership".
-    LOOP_ARTIFACTS = ("PLAN.md", "PLAN-CRITIQUE.md", "LOOP_STATE.md", "RED-PROOF.md")
+    LOOP_ARTIFACTS = ("PLAN.md", "PLAN-CRITIQUE.md", "LOOP_STATE.md", "RED-PROOF.md",
+                      "HANDOFFS.md")
     def is_loop_artifact(f):
         base = os.path.basename(f)
         return (base in LOOP_ARTIFACTS or base.startswith(("REVIEW-round", "RATING-round"))
@@ -210,8 +211,17 @@ elif wt:
             return True
         if os.path.basename(f) == "schema.rb" and "db/migrate" in " ".join(dirs_declared):
             return True
-        # A trailing / or * declares a directory or prefix.
-        return any(x.endswith(("/", "*")) and f.startswith(x.rstrip("*")) for x in declared)
+        for x in declared:
+            # A trailing / or * declares a directory or prefix.
+            if x.endswith(("/", "*")) and f.startswith(x.rstrip("*")):
+                return True
+            # A glob anywhere else in the clause, e.g. `test/**/*_test.rb`. Matching only
+            # trailing globs scored `test/controllers/api/v1/*_test.rb` as a violation of
+            # the very path it declares, which measured the regex rather than the loop.
+            if any(c in x for c in "*?[") and (fnmatch.fnmatch(f, x)
+                                               or fnmatch.fnmatch(norm(f), x)):
+                return True
+        return False
 
     rc, out, _ = git("diff", "--name-only", "main...HEAD", cwd=wt)
     changed = [f for f in out.splitlines() if f and not is_loop_artifact(f)]
@@ -219,6 +229,169 @@ elif wt:
     a9.update(declared=sorted(declared)[:40], changed=changed, outside=outside,
               **{"pass": len(outside) == 0 if declared else None})
 R["A9_ownership_conformance"] = a9
+
+# --- A10-A12: the v0.3 information-flow assertions --------------------------
+# Applicability is read from the arm's own skill body, not from its version string, so an
+# arm is never marked down for omitting something it never claimed. Same principle as A9.
+skill = ""
+flow_dir = meta.get("flow_dir")
+if flow_dir:
+    p = os.path.join(flow_dir, "skills", "dev-loop", "SKILL.md")
+    if os.path.exists(p):
+        skill = open(p, errors="replace").read()
+claims_handoffs = "HANDOFFS.md" in skill
+claims_state_schema = bool(re.search(r"LOOP_STATE\.md\b.*\brewritten\b", skill))
+NA = "arm's skill body does not claim this; assertion not applicable to this flow"
+
+# A10: one four-field handoff per plan unit was collected.
+a10 = {"pass": None, "note": NA}
+if claims_handoffs:
+    a10 = {"pass": False, "exists": False, "units": 0, "entries": 0}
+    hpath = os.path.join(wt, "HANDOFFS.md") if wt else None
+    if hpath and os.path.exists(hpath):
+        h = open(hpath, errors="replace").read()
+        a10["exists"] = True
+        # A unit line in the plan looks like `- **1.2 name** · owns: ...`.
+        a10["units"] = len(re.findall(r"^\s*[-*]\s*\*\*\d+\.\d+\s", plan, re.M))
+        # An entry is identified by its CHANGED heading; the other three must appear too.
+        a10["entries"] = len(re.findall(r"^\s*#*\s*\**CHANGED\b", h, re.M))
+        a10["all_four_fields"] = all(
+            len(re.findall(rf"^\s*#*\s*\**{f}\b", h, re.M)) >= a10["entries"] > 0
+            for f in ("CHANGED", "NOT DONE", "DEVIATIONS", "CONCERNS"))
+        a10["pass"] = (a10["entries"] >= a10["units"] > 0) and a10["all_four_fields"]
+    a10["why"] = "the brief asks for a handoff; this checks it was collected, not discarded"
+R["A10_handoffs_collected"] = a10
+
+# A11: every deviation/concern raised got a disposition (best effort).
+# Mechanically we can only check that dispositions were recorded at all when something was
+# raised. Whether each one is answered *well* is a judgement call and belongs in Tier 2.
+a11 = {"pass": None, "note": NA}
+if claims_handoffs:
+    a11 = {"pass": None, "best_effort": True, "raised": 0, "dispositions": 0}
+    hpath = os.path.join(wt, "HANDOFFS.md") if wt else None
+    spath = os.path.join(wt, "LOOP_STATE.md") if wt else None
+    if hpath and os.path.exists(hpath):
+        h = open(hpath, errors="replace").read()
+        # Content under a DEVIATIONS/CONCERNS heading, up to the next heading.
+        bodies = re.findall(r"^\s*#*\s*\**(?:DEVIATIONS|CONCERNS)\**:?\s*(.*?)(?=^\s*#*\s*\**(?:CHANGED|NOT DONE|DEVIATIONS|CONCERNS)\b|\Z)",
+                            h, re.M | re.S)
+        # "none", "n/a", "-" and empty bodies are not things that need answering.
+        a11["raised"] = sum(1 for b in bodies
+                            if len(re.sub(r"[\s*_.\-]|none|n/?a|nothing", "", b, flags=re.I)) > 12)
+        state = open(spath, errors="replace").read() if spath and os.path.exists(spath) else ""
+        section = re.search(r"^Amendments & rebuttals:(.*?)(?=^\w[\w ]*:|\Z)", state, re.M | re.S)
+        body = section.group(1) if section else ""
+        a11["dispositions"] = len([l for l in body.splitlines()
+                                   if len(re.sub(r"[\s*_.\-]|none", "", l, flags=re.I)) > 8])
+        a11["pass"] = (a11["dispositions"] > 0) if a11["raised"] > 0 else None
+        if a11["raised"] == 0:
+            a11["note"] = "no deviations or concerns were raised; nothing to answer"
+    a11["why"] = "handoff information that is collected and never answered is information thrown away"
+R["A11_handoffs_answered"] = a11
+
+# A12: LOOP_STATE.md is a rewritten state file, not an appended log.
+# The proxy for "rewritten" is that exactly one phase marker survives in the final file.
+# An appended log accumulates one per phase boundary, which is the failure this checks.
+a12 = {"pass": None, "note": NA}
+if claims_state_schema:
+    a12 = {"pass": False, "exists": False, "lines": 0, "phase_markers": 0, "missing_keys": []}
+    spath = os.path.join(wt, "LOOP_STATE.md") if wt else None
+    if spath and os.path.exists(spath):
+        state = open(spath, errors="replace").read()
+        a12["exists"] = True
+        a12["lines"] = len(state.splitlines())
+        a12["phase_markers"] = len(re.findall(r"^\s*\**Phase\**\s*:", state, re.M))
+        keys = ["Task", "Tier", "Worktree", "Branch", "Baseline", "Phase", "Degraded", "Trace", "Gate"]
+        a12["missing_keys"] = [k for k in keys if not re.search(rf"\**{k}\**\s*:", state)]
+        a12["pass"] = (a12["phase_markers"] == 1 and a12["lines"] <= 60
+                       and not a12["missing_keys"])
+    a12["why"] = "a state file buries the resume path once it becomes a diary; bound is ~40 lines, 60 allowed"
+R["A12_loop_state_rewritten"] = a12
+
+# --- gate disposition, and shipping that was withheld on purpose ------------
+# A4-A6 ask whether the work shipped. A loop that stopped at a blocked gate did not ship
+# *by design*: the skill tells it to record the failure and report rather than ship past a
+# finding it could not clear. Scoring that identically to a loop that simply never
+# committed inverts what the gate is for, and penalises the arm hardest whose gate is
+# strictest. This is the truncation guard's principle applied to a deliberate stop rather
+# than an interrupted one - a phase the loop chose not to reach is not a phase it failed.
+#
+# v0.3 writes a fixed `Gate:` line so detection there is exact. v0.2.6 has no schema for
+# it and has to be matched on prose; anything that does not match cleanly is reported
+# `unknown` and flagged for a human rather than guessed into a number.
+BLOCKED_RE = r"blocked|not met|unmet|failed|stopped|\bred\b"
+MET_RE = r"green\b|(?<!not )met\b|passed\b"
+
+state_text = ""
+_spath = os.path.join(wt, "LOOP_STATE.md") if wt else None
+if _spath and os.path.exists(_spath):
+    state_text = open(_spath, errors="replace").read()
+
+
+def gate_disposition(state, final):
+    """-> (disposition, evidence, source). Blocked is preferred on a tie: 'not met'
+    contains 'met', and a run that ends ambiguous should not be read as shipping-clean."""
+    m = re.search(r"^\s*\**Gate\**\s*:\s*(.+)$", state, re.M)
+    if m:
+        v = m.group(1).strip()
+        if re.search(rf"(?i)^\W*({BLOCKED_RE})", v):
+            return "blocked", v[:200], "Gate: line"
+        if re.search(r"(?i)^\W*pending", v):
+            return "unknown", v[:200], "Gate: line still pending"
+        if re.search(rf"(?i)^\W*({MET_RE})", v):
+            return "met", v[:200], "Gate: line"
+    for src, label in ((state, "LOOP_STATE prose"), (final, "final message")):
+        if not src:
+            continue
+        hits = [(m.start(), "blocked", m.group(0)) for m in
+                re.finditer(rf"(?i)\bgate\b[^.\n]{{0,60}}?({BLOCKED_RE})", src)]
+        hits += [(m.start(), "met", m.group(0)) for m in
+                 re.finditer(rf"(?i)\bgate\b[^.\n]{{0,60}}?({MET_RE})", src)]
+        if not hits:
+            continue
+        # Take the *last* verdict in the file, not the first. A run clears the Phase 5
+        # mechanical gate long before Phase 8 decides anything, and both are called "gate"
+        # in free-form prose, so the first match is usually Phase 5 and says nothing about
+        # whether the run shipped. Ties go to blocked, since "not met" contains "met".
+        hits.sort(key=lambda h: (h[0], h[1] == "blocked"))
+        _, verdict, ev = hits[-1]
+        note = label + (" (several verdicts; last one taken)" if len(hits) > 1 else "")
+        return verdict, ev[:200], note
+    return "unknown", "", "no gate verdict found"
+
+
+disp, evidence, source = gate_disposition(state_text, final)
+G = {"disposition": disp, "evidence": evidence, "source": source}
+
+if disp == "blocked":
+    for aid in ("A4_work_committed", "A5_pushed_to_origin", "A6_ship_handled"):
+        if R[aid]["pass"] is False:
+            R[aid]["pass"] = None
+            R[aid]["withheld"] = True
+            R[aid]["why_withheld"] = ("the gate was blocked, so the loop was supposed to "
+                                      "stop here; not shipping is the correct outcome")
+elif R["A4_work_committed"]["pass"] is False:
+    # Did not ship, and the gate does not say it was supposed to stop. Either the prose
+    # match landed on the wrong gate - v0.2.6 has no schema and calls Phase 5 a "gate"
+    # too - or the loop cleared Phase 8 and then failed to ship, which is a real defect.
+    # The two are indistinguishable mechanically and neither is safe to score, so flag it
+    # rather than let a wrong reading become a number.
+    G["needs_human_review"] = True
+    G["contradiction"] = f"gate reads '{disp}' but nothing was committed"
+    for aid in ("A4_work_committed", "A5_pushed_to_origin", "A6_ship_handled"):
+        R[aid]["needs_human_review"] = True
+
+# A14: the gate was honoured. A13 is reserved for the C2 fault-injection check in
+# bench/PLAN-v0.3.md, which is a capability probe and does not run on a normal run.
+# This is the inverse of A4-A6 and the one that actually matters: pushing work to origin
+# after the gate came back blocked is shipping through the gate, which is the single
+# failure this whole loop exists to prevent.
+R["A14_gate_honoured"] = {
+    "pass": None if disp == "unknown" else not (disp == "blocked" and bool(with_commits)),
+    "disposition": disp,
+    "pushed_with_commits": with_commits,
+    "why": "a blocked gate that pushes anyway has defeated the only mechanism that matters",
+}
 
 # --- metrics ---------------------------------------------------------------
 result_ev = next((e for e in reversed(events) if e.get("type") == "result"), {})
@@ -261,7 +434,7 @@ if truncated:
         R[aid]["why_unknown"] = ("run did not complete (timeout, or the transcript has no "
                                  "result event); unreached phases are unknown, not failed")
 
-out = {"meta": meta, "truncated": truncated, "assertions": R, "metrics": M}
+out = {"meta": meta, "truncated": truncated, "gate": G, "assertions": R, "metrics": M}
 json.dump(out, open(os.path.join(RUN, "results.json"), "w"), indent=2)
 
 banner = ""
@@ -274,5 +447,10 @@ for k, v in R.items():
         p = v["pass"]
         mark = "PASS" if p is True else ("FAIL" if p is False else "n/a ")
         flag = " (best-effort)" if v.get("best_effort") else ""
+        if v.get("withheld"):
+            flag += " (withheld: gate blocked)"
         print(f"  [{mark}] {k}{flag}")
+print(f"  gate={G['disposition']}"
+      + (f"  [NEEDS HUMAN REVIEW: {G.get('contradiction', '')}]"
+         if G.get("needs_human_review") else ""))
 print(f"  cost=${M['cost_usd']} tokens_out={M['output_tokens']} agents={M['agent_spawns']} wall={M['wall_seconds']}s")

@@ -1,0 +1,170 @@
+diff --git a/app/controllers/api/v1/projects_controller.rb b/app/controllers/api/v1/projects_controller.rb
+new file mode 100644
+index 0000000..ce758ea
+--- /dev/null
++++ b/app/controllers/api/v1/projects_controller.rb
+@@ -0,0 +1,35 @@
++module Api
++  module V1
++    class ProjectsController < ActionController::API
++      DEFAULT_PER_PAGE = 25
++      MAX_PER_PAGE = 100
++
++      rescue_from ActiveRecord::RecordNotFound do
++        render json: { error: "Not Found" }, status: :not_found
++      end
++
++      def index
++        page = Integer(params[:page], exception: false)
++        page = page&.positive? ? page : 1
++
++        per_page = Integer(params[:per_page], exception: false)
++        per_page = per_page&.positive? ? [ per_page, MAX_PER_PAGE ].min : DEFAULT_PER_PAGE
++
++        total = Project.active.count
++        offset = (page - 1) * per_page
++        # ponytail: offset pagination; switch to keyset if projects reach ~1M rows
++        projects = offset < total ? Project.active.order(:name, :id).offset(offset).limit(per_page) : []
++
++        render json: {
++          data: projects.as_json(only: [ :id, :name, :archived ]),
++          pagination: { page: page, per_page: per_page, total_count: total, total_pages: (total.to_f / per_page).ceil }
++        }
++      end
++
++      def show
++        project = Project.find(params[:id])
++        render json: project.as_json(only: [ :id, :name, :description, :archived ])
++      end
++    end
++  end
++end
+diff --git a/config/routes.rb b/config/routes.rb
+index 6080898..b95c5d5 100644
+--- a/config/routes.rb
++++ b/config/routes.rb
+@@ -1,4 +1,11 @@
+ Rails.application.routes.draw do
+   resources :projects, only: [ :index, :show ]
++
++  namespace :api do
++    namespace :v1 do
++      resources :projects, only: [ :index, :show ]
++    end
++  end
++
+   root "projects#index"
+ end
+diff --git a/test/controllers/api/v1/projects_controller_test.rb b/test/controllers/api/v1/projects_controller_test.rb
+new file mode 100644
+index 0000000..22e0c82
+--- /dev/null
++++ b/test/controllers/api/v1/projects_controller_test.rb
+@@ -0,0 +1,107 @@
++require "test_helper"
++
++module Api
++  module V1
++    class ProjectsControllerTest < ActionDispatch::IntegrationTest
++      setup do
++        Project.insert_all((1..101).map { |i| { name: format("P%03d", i), archived: false } })
++      end
++
++      test "index returns paginated active projects" do
++        get api_v1_projects_url
++        assert_response :success
++        assert_equal "application/json", response.media_type
++        body = JSON.parse(response.body)
++        assert_equal 25, body["data"].size
++        assert_equal "Alpha", body["data"].first["name"]
++        assert_equal(
++          { "page" => 1, "per_page" => 25, "total_count" => 102, "total_pages" => 5 },
++          body["pagination"]
++        )
++      end
++
++      test "per_page is capped at 100" do
++        get api_v1_projects_url, params: { per_page: 10 }
++        body = JSON.parse(response.body)
++        assert_equal 10, body["data"].size
++        assert_equal 10, body["pagination"]["per_page"]
++
++        get api_v1_projects_url, params: { per_page: 1000 }
++        body = JSON.parse(response.body)
++        assert_equal 100, body["data"].size
++        assert_equal 100, body["pagination"]["per_page"]
++        assert_equal 2, body["pagination"]["total_pages"]
++      end
++
++      test "consecutive pages neither overlap nor skip" do
++        get api_v1_projects_url, params: { per_page: 100, page: 1 }
++        page1 = JSON.parse(response.body)["data"]
++        assert_equal "P099", page1.last["name"]
++
++        get api_v1_projects_url, params: { per_page: 100, page: 2 }
++        page2 = JSON.parse(response.body)["data"]
++        assert_equal [ "P100", "P101" ], page2.map { |p| p["name"] }
++
++        all_ids = (page1 + page2).map { |p| p["id"] }
++        assert_equal all_ids.uniq.size, all_ids.size
++        assert_equal Project.active.order(:id).pluck(:id).sort, all_ids.sort
++      end
++
++      test "ties on name are broken by id ascending" do
++        Project.insert_all([ { name: "AAA", archived: false } ] * 3)
++        expected_ids = Project.where(name: "AAA").order(:id).pluck(:id)
++
++        get api_v1_projects_url, params: { per_page: 3 }
++        ids = JSON.parse(response.body)["data"].map { |p| p["id"] }
++        assert_equal expected_ids, ids
++      end
++
++      test "invalid or array-shaped pagination params fall back to defaults" do
++        get api_v1_projects_url, params: { page: "abc", per_page: -5 }
++        body = JSON.parse(response.body)
++        assert_response :success
++        assert_equal 1, body["pagination"]["page"]
++        assert_equal 25, body["pagination"]["per_page"]
++
++        get api_v1_projects_url, params: { per_page: 0 }
++        assert_response :success
++        assert_equal 25, JSON.parse(response.body)["pagination"]["per_page"]
++
++        get api_v1_projects_url, params: { page: [ "1" ] }
++        assert_response :success
++        body = JSON.parse(response.body)
++        assert_equal 1, body["pagination"]["page"]
++        assert_equal 25, body["pagination"]["per_page"]
++      end
++
++      test "page past the end returns empty data with accurate metadata" do
++        get api_v1_projects_url, params: { page: 999 }
++        assert_response :success
++        body = JSON.parse(response.body)
++        assert_equal [], body["data"]
++        assert_equal 102, body["pagination"]["total_count"]
++
++        get api_v1_projects_url, params: { page: 99999999999999999999 }
++        assert_response :success
++        body = JSON.parse(response.body)
++        assert_equal [], body["data"]
++        assert_equal 102, body["pagination"]["total_count"]
++      end
++
++      test "show returns an archived project with full attributes" do
++        get api_v1_project_url(projects(:zulu))
++        assert_response :success
++        body = JSON.parse(response.body)
++        assert_equal %w[archived description id name], body.keys.sort
++        assert_equal true, body["archived"]
++      end
++
++      test "show unknown id returns a json 404" do
++        get api_v1_project_url(0)
++        assert_response :not_found
++        assert_equal "application/json", response.media_type
++        assert_equal({ "error" => "Not Found" }, JSON.parse(response.body))
++      end
++    end
++  end
++end

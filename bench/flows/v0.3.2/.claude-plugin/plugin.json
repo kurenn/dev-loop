@@ -1,0 +1,6 @@
+{
+  "name": "dev-loop",
+  "version": "0.0.0",
+  "description": "Benchmark arm: dev-loop v0.3.2, pinned. v0.3 with one clause changed — the third waiver ground keys off an assumption or scope decision PLAN.md records rather than one the Phase 3 checkpoint approved, because the checkpoint never fires in an autonomous run and the ground was therefore unavailable in every run of every benchmark here. Deliberately does NOT carry v0.3.1's other additions: no demand to cite the line or identifier a waiver rests on, and no rebuttal disposition. Those cost 49% more Bash calls and 56% more money across three runs while going entirely unused, and this arm exists to test whether the ground-3 fix can be had without them.",
+  "skills": "./skills"
+}

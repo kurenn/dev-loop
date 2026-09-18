@@ -1,0 +1,6 @@
+{
+  "name": "dev-loop",
+  "version": "0.0.0",
+  "description": "Benchmark arm: dev-loop v0.3.1, pinned. Identical to the v0.3 arm except in Phase 8. The third waiver ground keys off what PLAN.md records rather than what the Phase 3 checkpoint approved — the checkpoint never fires in an autonomous run, which made the ground unavailable in every run of every benchmark here — and a MAJOR may now also be rebutted when it is factually wrong, with evidence. Exists because the ten-run matrix measured v0.3, and this is the text the plugin actually ships.",
+  "skills": "./skills"
+}

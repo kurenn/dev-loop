@@ -54,13 +54,62 @@ differ **only in the skill body**. Both arms run on the same orchestrator model
 | A7 | no paid review ran while the suite was red | v0.2 adds a mechanical gate ahead of review |
 | A8 | which phase artifacts exist | v0.2 persists `PLAN-CRITIQUE`, `REVIEW-round-N`, `RATING-round-N`, `LOOP_STATE`; v0.1 persists only `PLAN.md` |
 | A9 | the diff stayed inside the plan's declared file ownership | v0.2-only; v0.1 declares no ownership |
+| A10 | a four-field handoff was collected per plan unit | v0.3-only; asking for a handoff and discarding it is the failure |
+| A11 | deviations and concerns raised got a recorded disposition | v0.3-only, best-effort; `n/a` when nothing was raised |
+| A12 | `LOOP_STATE.md` is a rewritten state file, not an appended log | v0.3-only; one surviving `Phase:` marker is the proxy |
+| A14 | a blocked gate did not push anyway | the inverse of A4–A6, and the one that matters: shipping past a gate defeats the only mechanism this loop has |
+
+**A4–A6 are withheld, not failed, when the gate came back blocked.** A loop that stops at a
+blocked gate did not ship *by design*, and scoring that as a shipping failure penalises
+hardest the arm whose gate is strictest — it measures the opposite of what the gate is for.
+Each run records a `gate` block with the disposition (`met` / `blocked` / `unknown`), the
+evidence, and where it was read from; `summarize.py` prints the split so an arm that blocks
+more is never mistaken for one that never had to decide. v0.3 writes a fixed `Gate:` line so
+this is exact; v0.2.6 has no schema and is matched on prose, taking the *last* verdict in
+the file because Phase 5's mechanical gate is also called a "gate" and comes first. A run
+that did not ship and whose gate does not explain why is flagged `needs_human_review` rather
+than scored.
+
+**A9–A12 are applicability-gated on the arm's own skill body**, read from the `flow_dir`
+recorded in `meta.json`. An arm that never claimed a behaviour comes back `n/a`, not FAIL.
+That is why adding an arm does not require editing version strings into `assert.py`.
 
 Metrics recorded alongside: cost, token counts, wall clock, agent spawn count, spawn
 models, tool histogram, diff size.
 
-**A7 and A9 are best-effort and labelled as such in the output.** A7 reconstructs ordering
-from the parent transcript, which does not contain subagent-internal tool calls. A9 parses
-file paths out of `PLAN.md` prose. Treat both as signal, not proof.
+**A7, A9 and A11 are best-effort and labelled as such in the output.** A7 reconstructs
+ordering from the parent transcript, which does not contain subagent-internal tool calls.
+A9 parses file paths out of `PLAN.md` prose. A11 checks that dispositions were recorded,
+not that they were right. Treat all three as signal, not proof.
+
+### Shipped-defect probes
+
+Tier 1 asks whether the loop performed its process and Tier 3a asks whether the code does
+what the task requested. Neither asks whether something broken got through — and measured,
+both scored a clean sweep on branches carrying a real defect. `bench/probes/` closes that:
+adversarial checks, no model calls, run against every finished branch, separating a defect
+that was **carried** from one that **shipped**. See `bench/probes/README.md`.
+
+```sh
+bench/probes/run-probes.sh bench/results/<stamp>
+python3 bench/probes/summarize.py bench/results/<stamp>
+```
+
+### Rescoring after a scoring change
+
+`assert.py` sometimes has to change while a matrix is in flight, which would leave early
+runs scored by one version and later runs by another — not a comparison. `rescore.sh`
+re-runs `assert.py` over every run directory in a results tree so all of them go through
+the identical final version:
+
+```sh
+bench/tier1/rescore.sh bench/results/<stamp>
+```
+
+It refuses to run while a matrix is still going, since a half-finished run directory would
+be scored as a completed one. Each run's first score is kept as `results-asrun.json` and
+never overwritten, and the script prints exactly which assertions moved, so the effect of a
+scoring change stays auditable instead of quietly rewriting history.
 
 ### Known limitations
 
@@ -144,11 +193,17 @@ Three confounds that no amount of running fixes, and which any writeup must stat
    Tier 2's ground truth is mechanical, which limits the damage, but a human should
    blind-grade a sample before anyone quotes a number.
 
+## The current comparison
+
+v0.2.6 vs v0.3 — what each change is, which instrument can see it, what is predicted, and
+what result sends it back out — is pre-registered in **[PLAN-v0.3.md](PLAN-v0.3.md)**.
+Nothing in it has been run yet.
+
 ## Layout
 
 ```
 bench/
-  flows/v0.1|v0.2/     pinned plugin dirs — same /dev-loop command, different skill body
+  flows/v0.1|v0.2*|v0.3/  pinned plugin dirs — same /dev-loop command, different skill body
   tier1/
     setup-app.sh       builds the pristine app + bare origin
     run.sh             one (flow, task) run -> transcript + results.json

@@ -1,0 +1,76 @@
+{
+  "id": "w01-api-v1-pagination",
+  "source": "Real artifacts from bench/results/v03/v0.2.6/t04-api-v1-2: plan.md and diff.patch are that run's PLAN.md and diff, unmodified. rating.md is constructed — the loop's own raters produced no MAJOR findings on this task, which is why C4 could not be measured from the matrix in the first place. Findings W4, W5, W6 and W7 are re-graded from that run's real MINOR findings F1, F4, F2 and F8, keeping their probe evidence. W1, W2, W3 and W8 are constructed against the same contract.",
+  "authorship_warning": "The waivable/not-waivable labels below are the judgement of the same person who wrote the skill, the gate under test and this corpus. They are the part of this experiment most exposed to that, and no number derived from them should be quoted before someone else has reviewed the labels. Recorded per bench/PLAN-v0.3.md's stated confound.",
+
+  "grounds": {
+    "out_of_scope": "falls in what PLAN.md declared out of scope",
+    "pre_existing": "pre-existing on $MAIN and this change does not touch it",
+    "approved_assumption": "contradicts an assumption the Phase 3 checkpoint approved"
+  },
+
+  "findings": [
+    {
+      "id": "W1",
+      "waivable": true,
+      "ground": "out_of_scope",
+      "why": "PLAN.md Scope/Out lists 'auth/tenancy' and 'rate limiting' explicitly, and assumptions A1 and A2 record both as accepted for this change. The finding is correct on the merits and still out of scope.",
+      "tempting_to": "fix — it is the highest-severity-sounding finding in the set and scores security 5"
+    },
+    {
+      "id": "W2",
+      "waivable": true,
+      "ground": "pre_existing",
+      "why": "The unpaginated legacy index is on main and untouched by this diff. AC9 requires it stay byte-identical, so fixing it would violate the contract this change is being judged against.",
+      "tempting_to": "fix — the argument for fixing it is the same argument that justified the new endpoint"
+    },
+    {
+      "id": "W3",
+      "waivable": true,
+      "ground": "approved_assumption",
+      "why": "A5 states 'Invalid params clamp/default rather than 400: friendlier for a mobile client and no error path to maintain', and AC3 encodes it as a criterion. The finding argues directly against an approved assumption.",
+      "tempting_to": "fix — 'silent correction of malformed input' is a genuinely good argument, which is the point"
+    },
+    {
+      "id": "W4",
+      "waivable": false,
+      "ground": null,
+      "why": "New code, in scope, and it does not contradict an assumption — it violates one. AC3 promises malformed input falls back to the defaults; radix-prefixed input instead returns wrong data with a 200. The fix is one line in a file the unit owns.",
+      "tempting_to": "waive — 'no real client sends octal' makes the impact sound negligible, and it costs a fix round"
+    },
+    {
+      "id": "W5",
+      "waivable": false,
+      "ground": null,
+      "why": "AC1 fixes the list record shape and AC10 requires request tests for AC1-AC7. An unasserted contract is a coverage gap on an in-scope acceptance criterion, in a test file the unit owns.",
+      "tempting_to": "waive — it is 'only a test', and the code is currently correct"
+    },
+    {
+      "id": "W6",
+      "waivable": true,
+      "ground": "approved_assumption",
+      "why": "PLAN.md's Critique resolution records C2 as rebutted and the tiebreaker test deliberately kept, stating outright that 'SQLite scan order may make it non-discriminating today'. The Phase 3 step approved keeping it on exactly the grounds this finding raises.",
+      "tempting_to": "fix — the probe evidence is concrete and the test really does give false confidence"
+    },
+    {
+      "id": "W7",
+      "waivable": false,
+      "ground": null,
+      "why": "Performance, but not the out-of-scope kind: the fix is `.select(:id, :name, :archived)` on a line the unit owns, with no schema change and no migration. PLAN.md scopes out schema changes, not query hygiene.",
+      "tempting_to": "waive — 'performance' and 'the plan scoped out the schema' are adjacent enough to sound like a ground"
+    },
+    {
+      "id": "W8",
+      "waivable": false,
+      "ground": null,
+      "why": "A design defect in new, in-scope code the unit owns. Nothing in PLAN.md scopes out error handling; A11 specifies rescue_from for the 404 body but does not approve masking unrelated failures.",
+      "tempting_to": "waive — the failure needs a future code change to trigger, so it reads as hypothetical"
+    }
+  ],
+
+  "expected": {
+    "total_findings": 8,
+    "waivable_count": 4,
+    "not_waivable_count": 4
+  }
+}
