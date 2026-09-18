@@ -18,7 +18,7 @@ says so *in this invocation* — `--auto`, "run it autonomously", "don't stop", 
 checkpoints" — or when the project profile sets `Checkpoints: none`. Never infer it from
 urgency, from task size, from a deadline, or from a previous autonomous run. In autonomous
 mode every question that would have been asked becomes an assumption recorded in
-`PLAN.md` and repeated in the PR body.
+`$PLAN_FILE` and repeated in the PR body.
 
 If the user gave no task, ask what to build or fix.
 
@@ -62,6 +62,13 @@ Record these; every later phase uses them. Then:
 | Fix-round cap | from the Phase 1 tier (Light 1, Full 2) |
 | Learnings file | `docs/dev-loop-learnings.md` |
 | Telemetry axes | correctness, simplicity, test coverage, clarity, performance, security |
+| Worktree base (`$WT_BASE`) | `.worktrees/` (relative to `$ROOT`, trailing slash included) |
+| Plan file (`$PLAN_FILE`) | `PLAN.md` (relative to the worktree; may be a pattern using `$SLUG`, e.g. `docs/plans/PLAN.$SLUG.md`) |
+
+`$WT_BASE` and `$PLAN_FILE` come from the profile (Step 0 item 1) exactly like the other
+knobs, and every later phase refers to them by these names — the same convention as
+`$ROOT`/`$MAIN`. A silent profile keeps both at their defaults, so nothing changes for a
+repo that says nothing.
 
 ---
 
@@ -108,7 +115,7 @@ Files you own (create/edit only these): <explicit list from the plan>
 If your work requires touching a file you do not own, stop and report it instead of
 editing it.
 
-Your unit: <verbatim excerpt from PLAN.md>
+Your unit: <verbatim excerpt from $PLAN_FILE>
 Done when: <that unit's acceptance criteria>
 Before returning, run: <the profile's test command, scoped to your files>
 
@@ -121,6 +128,14 @@ CONCERNS — problems you noticed outside your unit. Report them; do not fix the
 
 Omitting this preamble is the single most common way this loop silently corrupts the
 main checkout.
+
+**Never instruct a transient edit to a file you have assigned to another agent** — a
+temporary probe, a debug line, a "just revert it after" change, anything that touches a
+file outside the instructing agent's own owned set even briefly. Post-wave
+`git status --porcelain` enforcement (Phase 4) cannot see this: the file ends up unchanged,
+so nothing is ever flagged. If you need something verified inside a file you do not own,
+ask the owning agent to verify it, or verify it yourself without writing — never write to
+it through someone else's brief.
 
 ---
 
@@ -154,7 +169,7 @@ main checkout.
 ```sh
 SLUG=<short-kebab-name>            # directory name; keep it short
 BR=<feature|fix|chore|refactor>/<branch-name>
-WT="$ROOT/.worktrees/$SLUG"
+WT="$ROOT/$WT_BASE$SLUG"           # $WT_BASE from the profile, default .worktrees/
 git worktree add "$WT" -b "$BR" "$MAIN"
 ```
 
@@ -170,9 +185,9 @@ git worktree add "$WT" -b "$BR" "$MAIN"
 - If the baseline cannot be made to run at all, **stop** and report exactly which command
   failed and what is missing. Do not implement against a broken environment.
 
-**2b — Write `PLAN.md` in the worktree.** Spawn one **fable** agent with the brief
+**2b — Write `$PLAN_FILE` in the worktree.** Spawn one **fable** agent with the brief
 preamble, and give it the **tier's plan cap** as a hard limit (Light 120 lines, Full 300).
-`PLAN.md` is a work contract, not a design essay: it is the decomposition the army
+`$PLAN_FILE` is a work contract, not a design essay: it is the decomposition the army
 executes and the criteria the work is judged against. If it does not fit the cap, the
 decomposition is being padded with prose — cut the prose, not the units. It must contain:
 
@@ -209,7 +224,7 @@ decomposition is being padded with prose — cut the prose, not the units. It mu
 ## Phase 3 — Critique the plan, then revise it
 
 1. Spawn **one fresh fable** agent — a different agent, not the planner. Give it only the
-   original request and `PLAN.md`; it must not see the planner's reasoning. Brief it to
+   original request and `$PLAN_FILE`; it must not see the planner's reasoning. Brief it to
    attack: wrong problem framing, missing acceptance criteria, ownership collisions
    between units in the same wave, wave-ordering errors, unstated assumptions,
    under-tested risk, scope creep, and cheaper approaches that were not considered.
@@ -221,9 +236,9 @@ decomposition is being padded with prose — cut the prose, not the units. It mu
    Reading the repo's own code is fine; leaving the repo is not.
 
    It writes `PLAN-CRITIQUE.md` containing, for each point: the problem, its severity, and
-   **the specific edit it proposes to `PLAN.md`**. It must not edit `PLAN.md` itself.
+   **the specific edit it proposes to `$PLAN_FILE`**. It must not edit `$PLAN_FILE` itself.
 2. **You** apply the critique — do not spawn the planner again. For each point, either make
-   the proposed edit to `PLAN.md` or record a one-line rebuttal in it. Silence is not
+   the proposed edit to `$PLAN_FILE` or record a one-line rebuttal in it. Silence is not
    allowed. The critic stays independent because it never authored the plan, and merging
    the revise step into the orchestrator saves a full model round trip: measured, the
    separate revise agent cost ~5 minutes of the 15.5 that Phase 3 consumed.
@@ -232,7 +247,7 @@ decomposition is being padded with prose — cut the prose, not the units. It mu
    explicitly requested. Show the user, compactly:
    - the problem statement and the acceptance-criteria checklist
    - the wave breakdown — unit name and owned paths, one line each
-   - every assumption from `PLAN.md`, and the risk tier
+   - every assumption from `$PLAN_FILE`, and the risk tier
    - what the critique changed, and anything you rebutted, with the reason
    - the cost shape — how many units, how many waves, whether Codex will run
 
@@ -268,16 +283,19 @@ Do not implement anything yourself.
   `git status --porcelain` in the worktree and check every changed path against that
   wave's declared ownership. The brief already tells agents to stay inside their set and
   it was breached in *every* benchmark run, so the instruction alone does not hold. For
-  anything outside: amend `PLAN.md` only if the file is genuinely required by an acceptance
+  anything outside: amend `$PLAN_FILE` only if the file is genuinely required by an acceptance
   criterion that unit owns, and record the amendment for the rater; otherwise revert it.
   Amending because the agent already wrote it turns the contract into a transcript of
   whatever happened. Never start the next wave with an unresolved violation, and never let
-  an undeclared file reach the rating phase unexplained.
+  an undeclared file reach the rating phase unexplained. **Stage each confirmed path by
+  name right now** — `git add <path>` for exactly the paths this check just cleared. This
+  running stage is the only staging the loop ever does; Phase 9 commits it, never
+  `git add -A`.
 - If an agent reports it needed a file it did not own, resolve the overlap yourself,
-  update `PLAN.md`, and note the amendment — do not let two agents fight over a file.
+  update `$PLAN_FILE`, and note the amendment — do not let two agents fight over a file.
 - **Collect the handoffs and answer them — silence is not allowed.** Append each unit's
   four-field handoff verbatim to `HANDOFFS.md` in the worktree. Before the next wave, every
-  `DEVIATIONS` and `CONCERNS` entry gets one of two dispositions: an amendment to `PLAN.md`,
+  `DEVIATIONS` and `CONCERNS` entry gets one of two dispositions: an amendment to `$PLAN_FILE`,
   recorded, or a one-line rebuttal in `LOOP_STATE.md` saying why it needs no action. An
   implementer saying "the plan was wrong here" is the earliest and cheapest signal this loop
   gets; collecting it and not answering it is the same defect as stating ownership and not
@@ -331,7 +349,7 @@ Do **not** use `/codex:adversarial-review`, `/codex:status` or `/codex:result` �
 are `disable-model-invocation: true` and you cannot call them.
 
 **Fallback (no codex, or the script is missing/changed):** spawn a fresh **fable** agent,
-given the worktree path, `PLAN.md` and `git diff $MAIN...HEAD`, briefed to find where the
+given the worktree path, `$PLAN_FILE` and `git diff $MAIN...HEAD`, briefed to find where the
 design fails under real-world conditions. Note in the PR that the review was in-family
 and therefore weaker.
 
@@ -339,13 +357,18 @@ Write the findings verbatim to `REVIEW-round-N.md` in the worktree. Fix nothing 
 
 ## Phase 7 — Rate (fresh opus, threshold-blind)
 
-Spawn one **opus** agent per round. It must not edit code. It has never seen this skill,
-so give it everything it needs. Do **not** tell it the gate. Use this brief:
+Spawn one **opus** agent per round. It must not edit code — not the worktree's files and
+not a temporary probe file either. If judging a finding requires proving a test would
+actually catch a regression, do it with a load-time monkeypatch in its own scratch script,
+never by writing to a file a unit owns: a probe file left on disk is exactly what a
+`git status --porcelain` ownership check cannot tell apart from real work, and exactly what
+a later blind `git add -A` would sweep in. It has never seen this skill, so give it
+everything it needs. Do **not** tell it the gate. Use this brief:
 
 ```
 You are an independent reviewer. You did not write this code. Judge it; do not change it.
 
-Inputs: PLAN.md (the contract), PLAN-CRITIQUE.md, the diff of <MAIN>...HEAD in
+Inputs: $PLAN_FILE (the contract), PLAN-CRITIQUE.md, the diff of <MAIN>...HEAD in
 <worktree path>, the mechanical check results, and REVIEW-round-N.md.
 Also HANDOFFS.md — the implementers' own reports on their work. These are claims to
 verify and leads on where to look hardest, never evidence that anything is correct. An
@@ -355,7 +378,7 @@ If the diff exceeds ~2000 lines, read the files in the worktree yourself using
 
 Return exactly these sections:
 
-1. ACCEPTANCE — each acceptance criterion from PLAN.md marked met / partial / unmet,
+1. ACCEPTANCE — each acceptance criterion from $PLAN_FILE marked met / partial / unmet,
    with the evidence (file:line or test name). Every unmet criterion is BLOCKING.
 2. FINDINGS — every issue, each with severity:
    BLOCKING = incorrect behavior, data loss, a security hole, or an unmet acceptance
@@ -378,7 +401,7 @@ Return exactly these sections:
    means no security concern. These are telemetry, not a pass/fail judgment — score
    honestly rather than charitably. More code is never better by itself: judge fitness
    to the task, and mark down a solution that is larger than the problem.
-4. PLAN DRIFT — where the implementation departed from PLAN.md, and whether each
+4. PLAN DRIFT — where the implementation departed from $PLAN_FILE, and whether each
    departure was justified.
 
 Extra axes: <from the profile, or "none">
@@ -396,9 +419,9 @@ Write the result to `RATING-round-N.md`.
 3. Every MAJOR finding is either fixed or waived with a one-line written reason.
 
 **A MAJOR may be waived only on one of three grounds**, and the waiver must name which:
-it falls in what `PLAN.md` declared out of scope; it is pre-existing on `$MAIN` and this
+it falls in what `$PLAN_FILE` declared out of scope; it is pre-existing on `$MAIN` and this
 change does not touch it; or it argues against an assumption or scope decision that
-`PLAN.md` records. The ground is the plan's record, not who signed it.
+`$PLAN_FILE` records. The ground is the plan's record, not who signed it.
 Anything else is fixed. The enumeration exists because you are simultaneously the party
 under cost pressure and the party deciding what to waive — the one place in this loop where
 the judge and the executor are the same agent, and the place a fix round is cheapest to
@@ -409,7 +432,13 @@ The 1–10 scores never gate anything — they go in the PR body as telemetry. T
 deliberate: an unanchored self-report clustered in the 7–9 band is not a control.
 
 - **Gate met** → Phase 9.
-- **Not met** → dispatch **sonnet** agents (brief contract preamble, ownership from the
+- **Not met** → **judge a finding and any remedy it proposes as two separate decisions**
+  before dispatching a fix. A Phase 6 adversarial challenge or a Phase 7 finding often
+  arrives with a suggested fix attached, and adopting that fix wholesale is not the same
+  as fixing the finding — verify the remedy actually resolves the failure scenario the
+  finding describes **and** does not break the happy path the finding never mentioned; a
+  suggested patch adopted wholesale once broke exactly that path. Then dispatch **sonnet**
+  agents (brief contract preamble, ownership from the
   plan) to fix the BLOCKING findings first, then the MAJORs. A fix must be the smallest
   change that resolves the finding: fix rounds are where scaffolding accretes, because
   adding code always looks like progress. Removing implementation code is a legitimate fix.
@@ -417,7 +446,9 @@ deliberate: an unanchored self-report clustered in the 7–9 band is not a contr
   widening a bound, or deleting a case removes coverage, not complexity — measured, the
   first build with disproportion enforced lost the assertion pinning an `:id` tiebreaker
   and weakened a page-cap check to a bound its fixture could not exercise. Coverage may
-  only fall when the code it covered is gone. Then **re-run Phase 5**, and
+  only fall when the code it covered is gone. **Stage each fix's confirmed paths by name
+  as its handoff lands** — the same discipline as Phase 4, never a blanket `git add -A`.
+  Then **re-run Phase 5**, and
   re-run Phase 7 as a **delta judgment**: give the new rater `RATING-round-N.md` plus the
   diff since the fix, and ask it to verify each prior finding was actually addressed and
   to flag anything the fix broke. Delta judgment is better calibrated and far cheaper
@@ -426,7 +457,7 @@ deliberate: an unanchored self-report clustered in the 7–9 band is not a contr
   approach; otherwise the delta judgment is enough.
 - **Respect the fix-round cap** from the Phase 1 tier (Light 1, Full 2). If BLOCKING
   findings survive the last round,
-  stop: write what is blocking into `PLAN.md` and `LOOP_STATE.md`, still run Phase 9's
+  stop: write what is blocking into `$PLAN_FILE` and `LOOP_STATE.md`, still run Phase 9's
   learnings capture, and report to the user with the surviving findings. Never loosen
   the gate to pass, and never reclassify a BLOCKING finding as MAJOR to get through it.
 
@@ -439,8 +470,13 @@ deliberate: an unanchored self-report clustered in the 7–9 band is not a contr
    pattern worth repeating, a recurring adversarial challenge, a place the plan was
    wrong. Map, not diary. Nothing user-specific or secret. **Run this step even when the
    loop stopped at the gate** — failed runs teach the most.
-2. **Commit.** Nothing before this phase commits, so the worktree is dirty. Stage
-   everything and commit with a conventional message referencing the plan.
+2. **Commit.** Nothing before this phase commits. Phase 4 and Phase 8 already staged every
+   worker's changes by name as each handoff was confirmed — never run `git add -A` here.
+   Stage this phase's own artifacts by name too (the plan file, `PLAN-CRITIQUE.md`,
+   `HANDOFFS.md`, `REVIEW-round-N.md`, `RATING-round-N.md`, `LOOP_STATE.md`, the learnings
+   file), then check `git status --porcelain`: anything still unstaged is unexplained —
+   stop and report it rather than sweeping it in. Commit what is staged with a conventional
+   message referencing the plan.
 3. **Push, then open the PR — these are two separate decisions.**
    - **Push whenever the repo has a git remote**, regardless of `GH`:
      `cd "$WT" && git push -u origin "$BR"`. Pushing is git; a repo can have a perfectly
@@ -460,7 +496,7 @@ deliberate: an unanchored self-report clustered in the 7–9 band is not a contr
      degraded phases (in-family review, skipped mechanical checks, no specialist agents)
    - **Improvement applied** — what the fix rounds changed; follow-ups deferred
    - **Test plan** — how to verify, including manual steps for UI changes
-   - **Assumptions** — the ones from `PLAN.md`, marked as approved at the Phase 3
+   - **Assumptions** — the ones from `$PLAN_FILE`, marked as approved at the Phase 3
      checkpoint or shipped unreviewed under autonomous mode
 5. Report the worktree path to the user. Do not remove it — they may still want it.
 
@@ -472,7 +508,7 @@ Everything the loop learns lives in files in the worktree, not in your context:
 
 | File | Written by |
 |---|---|
-| `PLAN.md` | Phase 2, amended in 4 and 8 |
+| `$PLAN_FILE` | Phase 2, amended in 4 and 8 |
 | `PLAN-CRITIQUE.md` | Phase 3 |
 | `HANDOFFS.md` | Phase 4, one entry per unit |
 | `REVIEW-round-N.md` | Phase 6 |
@@ -505,6 +541,13 @@ branch it is also the only record of what a run actually cost once the session i
 - **Cost is real, and it compounds.** Parallel army × review passes × fix rounds. The
   Phase 1 tier decision and the fix-round cap are the two brakes — use both.
 - **Never edit the main checkout after Phase 2.** Every path is worktree-relative.
-- **The plan is the contract.** If implementation proves it wrong, amend `PLAN.md`,
+- **While any worker is live, you run nothing in the worktree** — no test command, no
+  lint, no `git` write, nothing that reads or writes a tree a spawned agent might still be
+  touching. Wait for every agent in the wave or fix round to return first. Two incidents
+  came from skipping this: `bundle exec rspec` run by the orchestrator mid-edit by a still
+  running worker, and a blind `git add -A` that swept up a rater's probe file that should
+  never have existed on disk (Phase 7). Stage only the named paths a handoff just confirmed
+  (Phase 4, Phase 8) — Phase 9 commits what is already staged, and never runs `git add -A`.
+- **The plan is the contract.** If implementation proves it wrong, amend `$PLAN_FILE`,
   record the amendment, and make sure the rating judges the amendment too. Amending the
   contract to make the work look faithful is the one way to cheat this loop.

@@ -1,6 +1,6 @@
 ---
 name: dev-loop-setup
-description: "Prepare any repository — any language or framework — to run /dev-loop. Detects and verifies the project's install, test, lint, typecheck and security commands, checks gh auth and optional accelerators (codex, stack specialist subagents), writes a '## Dev-loop config' profile into CLAUDE.md, gitignores .worktrees/, and creates the learnings file. Run once per repo before the first /dev-loop."
+description: "Prepare any repository — any language or framework — to run /dev-loop. Detects and verifies the project's install, test, lint, typecheck and security commands, checks gh auth and optional accelerators (codex, stack specialist subagents), writes a '## Dev-loop config' profile into CLAUDE.md, gitignores the worktree directory, and creates the learnings file. Run once per repo before the first /dev-loop."
 ---
 
 # /dev-loop-setup — prepare a repo for the loop
@@ -91,6 +91,8 @@ Project profile read by the `/dev-loop` skill (@kurenn/dev-loop). Verified <YYYY
 
 **Worktree**
 - Local config to copy: <e.g. config/master.key, .env — or none>
+- Worktree base: <e.g. .worktrees/ — or .claude/worktrees/ for a repo with its own worktree convention; default .worktrees/>
+- Plan file: <e.g. PLAN.md — or docs/plans/PLAN.$SLUG.md for a repo that cites plans by bare filename; default PLAN.md>
 
 **Execution**
 - Checkpoints: plan   <!-- "plan" = stop for approval after the plan critique; "none" = fully autonomous -->
@@ -109,10 +111,11 @@ Project profile read by the `/dev-loop` skill (@kurenn/dev-loop). Verified <YYYY
 
 ## Step 4 — Gitignore the worktree directory
 
-`/dev-loop` creates worktrees under `.worktrees/` inside the repo. Untracked, that is a
-second full checkout sitting in the working tree: `git status` noise, and test runners,
-linters and file watchers descending into it. Add `.worktrees/` to `.gitignore` if it
-isn't there.
+`/dev-loop` creates worktrees under the profile's **Worktree base** (default `.worktrees/`)
+inside the repo. Untracked, that is a second full checkout sitting in the working tree:
+`git status` noise, and test runners, linters and file watchers descending into it. Add
+that directory to `.gitignore` if it isn't there — the literal `.worktrees/` unless Step 3
+set a different Worktree base.
 
 ## Step 5 — Create the learnings file
 
