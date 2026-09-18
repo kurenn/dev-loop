@@ -73,11 +73,26 @@ def stat(vals):
     return f"{statistics.mean(vals):.2f} +/- {statistics.stdev(vals):.2f} (n={len(vals)})"
 
 
+def aborted(r):
+    """A run that reached no gate verdict and committed nothing did not finish.
+
+    `truncated` only catches the timeout. A run killed by an API rate limit at Phase 2 is
+    not truncated, so it was averaged in as a cheap, fast run — which understated a real
+    cost regression and roughly tripled the reported variance, the two things that would
+    have decided the question. Cost from a run that stopped early is not cost.
+    """
+    verdict = (r.get("gate") or {}).get("disposition")
+    committed = (r.get("assertions", {}).get("A4_work_committed") or {}).get("pass")
+    return verdict in ("unknown", "unscored", None) and committed is False
+
+
 print("\ncost and wall clock — complete runs only")
 for (flow, task), rs in sorted(groups.items()):
-    ok = [r for r in rs if not r.get("truncated")]
+    ok = [r for r in rs if not r.get("truncated") and not aborted(r)]
+    dropped = len(rs) - len(ok)
     if not ok:
         print(f"  {flow} {task}: no complete runs")
         continue
+    note = f"   [{dropped} incomplete, excluded]" if dropped else ""
     print(f"  {flow} {task}:  ${stat([r['metrics'].get('cost_usd') for r in ok])}"
-          f"   {stat([r['metrics'].get('wall_seconds') for r in ok])} s")
+          f"   {stat([r['metrics'].get('wall_seconds') for r in ok])} s{note}")
