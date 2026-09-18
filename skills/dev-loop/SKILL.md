@@ -198,6 +198,13 @@ decomposition is being padded with prose — cut the prose, not the units. It mu
 - **Assumptions** — every open question and the answer being assumed. This section is
   what the Phase 3 checkpoint exists to surface; in autonomous mode it ships unreviewed,
   so it must be complete.
+- **Provenance for givens.** Any claim the plan states as settled — a fact about the
+  codebase, a framework's behavior, a measured number, anything later phases are told
+  not to re-derive — carries its `file:line`, or is marked unverified. "`config/
+  database.yml:47` falls back to the shared database" can be checked in one command;
+  "the test database is private per checkout" cannot, and that exact sentence shipped a
+  defect: a plan asserted it as given, four implementation agents and two review gates
+  read it as already-decided and built on it, and it was wrong.
 - **Work breakdown into waves.** This is what makes parallel execution safe:
 
 ```markdown
