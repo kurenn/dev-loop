@@ -82,6 +82,22 @@ ordering from the parent transcript, which does not contain subagent-internal to
 A9 parses file paths out of `PLAN.md` prose. A11 checks that dispositions were recorded,
 not that they were right. Treat all three as signal, not proof.
 
+### Interleave the arms, always
+
+**Run arm A run 1, arm B run 1, arm A run 2, arm B run 2** — never one arm to completion and
+the other tomorrow.
+
+This is not hygiene, it is the difference between a result and a coincidence. The v0.3 matrix
+ran one arm per day, and re-running the byte-identical v0.3 skill two days later cost 65%
+more, ran 89% longer, and shipped a defect in 3 of 3 runs where it had shipped 1 of 3. Every
+between-arm comparison in that matrix was smaller than that, so all of them were withdrawn —
+including one that appeared to trip a pre-registered rollback condition. See the retraction at
+the top of `RESULTS.md`.
+
+Day-to-day service variation is the largest effect this harness has ever measured. Interleaving
+is the only thing that subtracts it. When in doubt, re-run one arm unchanged as a control and
+see what identical input costs.
+
 ### Shipped-defect probes
 
 Tier 1 asks whether the loop performed its process and Tier 3a asks whether the code does

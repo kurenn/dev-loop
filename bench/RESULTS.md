@@ -378,7 +378,49 @@ any of these numbers are quoted.
 
 ---
 
+## Retraction — arm and date were confounded, and the effects were smaller than the confound
+
+**Every quantitative comparison between arms in the v0.3 matrix is withdrawn.** Arms were run
+one per day — v0.2.6 and v0.3 on Sep 16, v0.3.1 on Sep 17, v0.3.2 on Sep 18 — and no arm was
+repeated across days, so "which arm" and "which day" are the same variable.
+
+Running the **byte-identical v0.3 skill** a second time, as `v0.3-ctl`, measured what that
+was worth:
+
+| v0.3 skill text | cost | wall | shipped a defect |
+|---|---|---|---|
+| Sep 16 | $7.47 ± 0.38 | 1249 ± 94 s | 1/3 |
+| Sep 18 | **$12.36 ± 2.51** | **2361 ± 622 s** | **3/3** |
+
++65% cost and +89% wall clock with nothing changed. That is larger than any difference this
+matrix attributed to a skill change, including the +56% that was reported as v0.3.1 tripping
+the pre-registered cost condition. **It did not trip it. The condition fired on an artifact.**
+
+Specifically withdrawn:
+
+- *"v0.3.1 costs 56% more than v0.3."* Same-day, v0.3.2 came in **below** the v0.3 control.
+- *"v0.3 ships fewer defects than v0.2.6 (1/3 vs 2/3)."* The same text shipped 1/3 on Sep 16
+  and 3/3 on Sep 18. The probes are sound; what they measured here was the day.
+- The `RESULTS` and `CHANGELOG` framing that called the probe result "the first outcome
+  measurement that goes to what the loop is actually for". It was, in method. Not in fact.
+
+What survives is not measured but structural, and provable by reading: ground 3 keyed to an
+approval the Phase 3 checkpoint issues, and that checkpoint never fires in an autonomous run,
+so the ground could never apply. And across nine end-to-end runs of v0.3.1, v0.3.2 and the
+control, the gate used **zero waivers and zero rebuttals** — the clause all this refining went
+into governs a decision the loop does not make on this task.
+
+**Required of any future run: interleave the arms within one session.** Run arm A run 1, arm B
+run 1, arm A run 2, and so on. Every cost or rate comparison in this file that predates that
+rule is indicative at best. The harness never had this rule, which is the actual defect.
+
+---
+
 ## Shipped-defect probes — did anything broken reach main?
+
+> **Withdrawn — see the retraction above.** The arms below ran on different days and the
+> same skill text shipped 1/3 one day and 3/3 two days later. The instrument works; this
+> application of it does not support a comparison.
 
 Every Tier 1 assertion passed on both arms across ten runs, and the Tier 3a hidden suite
 passes 8/8 on branches that carry a real defect, because it grades the task text and the task

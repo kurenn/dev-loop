@@ -83,15 +83,6 @@ Pass these as `model:` on the Agent tool. You **cannot** set your own model — 
 session is not running a strong model, say so once and continue; the phase models still
 apply to the agents you spawn.
 
-**If the Agent tool itself is unavailable, stop and report — never degrade silently.**
-This is a different failure than a single agent erroring (Phase 4 already handles that by
-re-dispatch): it means no phase from here on can spawn anything at all. Measured: five
-parallel loops once ran with no Agent tool available and every phase quietly fell back to
-running in the orchestrator's own model instead — nothing failed and nothing warned, and
-the loop that shipped was not the loop this skill describes. The moment a spawn attempt
-fails because the tool is missing, stop, tell the user the Agent tool is unavailable, and
-do not substitute your own model for the agents you were supposed to spawn.
-
 ## The agent brief contract
 
 Subagents do **not** inherit your context and do **not** inherit your working directory —
@@ -397,8 +388,7 @@ Write the result to `RATING-round-N.md`.
 
 **A MAJOR may be waived only on one of three grounds**, and the waiver must name which:
 it falls in what `PLAN.md` declared out of scope; it is pre-existing on `$MAIN` and this
-change does not touch it; or it argues against an assumption or scope decision that
-`PLAN.md` records. The ground is the plan's record, not who signed it.
+change does not touch it; or it contradicts an assumption the Phase 3 checkpoint approved.
 Anything else is fixed. The enumeration exists because you are simultaneously the party
 under cost pressure and the party deciding what to waive — the one place in this loop where
 the judge and the executor are the same agent, and the place a fix round is cheapest to

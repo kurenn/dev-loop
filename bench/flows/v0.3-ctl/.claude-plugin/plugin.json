@@ -1,0 +1,6 @@
+{
+  "name": "dev-loop",
+  "version": "0.0.0",
+  "description": "Benchmark arm: v0.3-ctl. A byte-identical copy of the v0.3 arm, run on a later date as a contemporaneous control. The v0.2.6/v0.3 matrix ran Sep 16, v0.3.1 Sep 17 and v0.3.2 Sep 18, with no arm repeated across days -- so the cost ordering tracks the calendar as well as it tracks the skill, and nothing measured is attributable until one arm is run twice. Identical skill text is the point: any difference here is the service, not dev-loop.",
+  "skills": "./skills"
+}

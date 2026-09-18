@@ -55,5 +55,11 @@ run of this directory.
 
 ## Known gaps
 
+**The instrument is sound; its first application was not.** The v0.3 matrix ran each arm on a
+different day, and the byte-identical v0.3 skill shipped a defect in 1 of 3 runs on one day and
+3 of 3 two days later. Shipped-defect rate is at least that sensitive to the service, so a
+comparison between arms means nothing unless the arms were interleaved within one session. The
+numbers this directory produced for that matrix are withdrawn.
+
 D2, D5 and D6 have never fired on any run in the corpus. They are unexercised, not
 validated: a probe that has only ever passed has not been shown to be capable of failing.
