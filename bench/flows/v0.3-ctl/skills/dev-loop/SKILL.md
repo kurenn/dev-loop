@@ -388,8 +388,7 @@ Write the result to `RATING-round-N.md`.
 
 **A MAJOR may be waived only on one of three grounds**, and the waiver must name which:
 it falls in what `PLAN.md` declared out of scope; it is pre-existing on `$MAIN` and this
-change does not touch it; or it argues against an assumption or scope decision that
-`PLAN.md` records. The ground is the plan's record, not who signed it.
+change does not touch it; or it contradicts an assumption the Phase 3 checkpoint approved.
 Anything else is fixed. The enumeration exists because you are simultaneously the party
 under cost pressure and the party deciding what to waive — the one place in this loop where
 the judge and the executor are the same agent, and the place a fix round is cheapest to

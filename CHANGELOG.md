@@ -19,14 +19,21 @@ worse, and the run that blocked did so over an issue measured at 0.76 ms. That l
 closer to C4's pre-registered *failure* mode — over-fixing — than to a catch. C4 itself
 stays unmeasured, since v0.2.6 never found a MAJOR and so never faced a waiver decision.
 
-Two instruments added afterwards do separate them. A **waiver replay** isolates the gate on a
-fixed corpus and is reported below. **Shipped-defect probes** ask the one question nothing
-else here asked — did something broken reach main — and found v0.2.6 shipping a defect in
-2 of 3 runs against v0.3's 1 of 3. Both arms *write* defects at the same rate; the difference
-is entirely that v0.3's gate blocked a run. That is a real outcome difference and a small
-one: n=3, and both defect classes are minor by the probes' own labelling. The probes exist
-because this defect was originally found by reading controllers by hand while every Tier 1
-assertion and all 8 hidden acceptance tests passed on the branch carrying it.
+**No quantitative comparison between the arms survived review**, including ones an earlier
+draft of this entry stated as findings. Each arm ran on its own day, so arm and date were the
+same variable. Re-running the byte-identical v0.3 text two days later cost 65% more, ran 89%
+longer, and shipped a defect in 3 of 3 runs where it had shipped 1 of 3 — a bigger swing than
+any effect attributed here to a change in the skill. The cost regression this entry once
+reported for v0.3.1, and the claim that v0.3 ships fewer defects than v0.2.6, are both
+withdrawn. Details in `bench/RESULTS.md`; the harness now requires arms to be interleaved
+within a single session, which is the rule whose absence caused this.
+
+Two instruments came out of it and are worth keeping. A **waiver replay** isolates the gate on
+a fixed corpus, and is how the inert ground below was caught. **Shipped-defect probes** ask
+whether something broken reached main — the question nothing else here asked, and the reason
+the one real defect in this matrix was originally found by reading controllers by hand while
+every Tier 1 assertion and all 8 hidden acceptance tests passed on the branch carrying it.
+Both are sound instruments that were pointed at a confounded experiment.
 
 - **Unit agents return a four-field handoff** — CHANGED, NOT DONE, DEVIATIONS, CONCERNS —
   and the orchestrator must answer it. The brief already asked for roughly this
@@ -56,14 +63,15 @@ assertion and all 8 hidden acceptance tests passed on the branch carrying it.
   fires in an autonomous run, so nothing is ever approved and the ground was unavailable in
   every run of every benchmark here. It accounted for **the entire over-fixing rate** — the
   gate fixing findings that merely disagreed with a decision it had already written down.
-  Keying it to the plan's record instead took over-fixing from 45% to 0%, at the cost of one
-  finding that should not have been waivable. See `bench/waivers/`.
-- **A MAJOR can now be rebutted, not only fixed or waived** — when it is factually wrong, with
-  evidence: a probe, a cited line, or documented framework behaviour. Disagreement and
-  "the severity is overstated" are not rebuttals. Raters are wrong sometimes, and the
-  three-grounds gate gave the orchestrator no way to say so, leaving it to implement fixes it
-  believed were pointless; measured, that is what it did. This path is **untested** — the
-  waiver corpus contains no wholly-false finding to exercise it.
+  Keying it to the plan's record instead took over-fixing from 45% to 0% on that corpus, at
+  the cost of one finding that should not have been waivable. The corpus is author-written
+  with two contested labels at n=5, and the inertness — not the rate — is the part that holds
+  without it, because it follows from the checkpoint never firing. See `bench/waivers/`.
+  A rebuttal disposition for findings that are factually wrong, and a requirement to cite the
+  line or identifier a waiver rests on, were both written, benchmarked and **cut**. Neither was
+  used once in nine end-to-end runs, and the corpus that motivated the rebuttal contained no
+  wholly-false finding to exercise it. The shipped gate is the smallest change that fixes a
+  ground provably unreachable in autonomous mode, and nothing more.
 
 Benchmark harness: three new Tier 1 assertions (A10 handoffs collected, A11 handoffs
 answered, A12 state rewritten), applicability-gated on each arm's own skill body so an arm
