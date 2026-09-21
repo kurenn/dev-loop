@@ -21,20 +21,37 @@ TRUTH = {v["id"]: v for v in json.load(open(os.path.join(CASEDIR, "index.json"))
 FENCE = re.compile(r"```json\s*(\{.*?\})\s*```", re.S)
 
 
+# Narrow on purpose, and only ever consulted when there is no answer to parse. A first cut
+# matched "rate limit" and "HTTP 4xx" anywhere in the text and threw away 32 of 60 valid
+# ratings on this corpus — which is an API pagination case, so raters write those words in
+# their findings. An error detector that eats good data is worse than none.
+API_ERROR = re.compile(r"session limit|error type rate_limit|Claude Code is unavailable", re.I)
+
+
 def extract(path):
+    """Return (finding-json | None, api_errored).
+
+    A response the API refused and one the rater malformed both arrive as "no fenced json",
+    and treating them alike is how a whole run of nothing gets reported as ninety bad
+    answers. They mean opposite things: one is retry later, the other is fix the prompt.
+    """
     if not os.path.exists(path):
-        return None
+        return None, False
     try:
-        text = json.load(open(path)).get("result", "")
+        raw = json.load(open(path))
     except Exception:
-        return None
-    m = FENCE.findall(text or "")
-    if not m:
-        return None
-    try:
-        return json.loads(m[-1])
-    except json.JSONDecodeError:
-        return None
+        return None, False
+    text = raw.get("result", "") or ""
+    if raw.get("is_error"):
+        return None, True
+    m = FENCE.findall(text)
+    if m:
+        try:
+            return json.loads(m[-1]), False
+        except json.JSONDecodeError:
+            return None, False
+    # No answer to parse: only now is the text worth sniffing for a refusal.
+    return None, bool(API_ERROR.search(text))
 
 
 def gate_v01(v):
@@ -69,6 +86,7 @@ scores = collections.defaultdict(list)
 severities = collections.defaultdict(list)
 counts = collections.defaultdict(list)
 unparsed = collections.Counter()
+api_errors = collections.Counter()
 
 for vid in sorted(os.listdir(OUT)):
     vdir = os.path.join(OUT, vid)
@@ -76,7 +94,10 @@ for vid in sorted(os.listdir(OUT)):
         continue
     for arm in sorted(os.listdir(vdir)):
         for rep in sorted(os.listdir(os.path.join(vdir, arm))):
-            v = extract(os.path.join(vdir, arm, rep, "response.json"))
+            v, errored = extract(os.path.join(vdir, arm, rep, "response.json"))
+            if errored:
+                api_errors[(vid, arm)] += 1
+                continue
             if v is None:
                 unparsed[(vid, arm)] += 1
                 continue
@@ -93,7 +114,15 @@ for vid in sorted(os.listdir(OUT)):
             if axes:
                 scores[(vid, arm, "min_axis")].append(min(axes))
 
-ARMS = sorted({k[1] for k in rows} | {k[1] for k in unparsed})
+ARMS = sorted({k[1] for k in rows} | {k[1] for k in unparsed} | {k[1] for k in api_errors})
+
+n_err = sum(api_errors.values())
+n_ok = sum(len(v) for v in rows.values())
+if n_err and n_err >= n_ok:
+    print(f"\n*** RUN VOID — {n_err} of {n_err + n_ok} calls were refused by the API ***")
+    print("Not a result. Nothing below is a measurement of any rater; re-run when the")
+    print("limit clears. Reported separately from unparsed answers on purpose: this is")
+    print("'retry later', not 'the rater returned nonsense'.\n")
 
 print(f"\ncase: {os.path.basename(CASEDIR)}\n")
 hdr = f"{'variant':<32} {'truth':<6} " + "".join(f"{a + ' block':<12}" for a in ARMS)

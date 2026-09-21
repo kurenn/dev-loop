@@ -39,9 +39,13 @@ for VARIANT in "$CASEDIR"/variants/*/; do
   # BENCH_VARIANT filters to a single variant, for iterating on the corpus cheaply.
   if [ -n "${BENCH_VARIANT:-}" ] && [ "$VID" != "$BENCH_VARIANT" ]; then continue; fi
   DIFF="$(cat "$VARIANT/diff.patch")"
-  for ARM in $ARMS; do
-    RATER="$(sed '1,/^---$/d' "$BENCH/tier2/raters/$ARM.md")"
-    for REP in $(seq 1 "$REPS"); do
+  # Rep outer, arm inner: the arms alternate call by call rather than running in blocks.
+  # Measured the hard way — a matrix that ran one arm per day had 65% cost drift between
+  # days on byte-identical input, larger than every effect it was trying to detect. Within
+  # a session the drift is smaller, but the fix is free, so there is no reason to eat it.
+  for REP in $(seq 1 "$REPS"); do
+    for ARM in $ARMS; do
+      RATER="$(sed '1,/^---$/d' "$BENCH/tier2/raters/$ARM.md")"
       DEST="$OUT/$VID/$ARM/rep-$REP"
       mkdir -p "$DEST"
       {
