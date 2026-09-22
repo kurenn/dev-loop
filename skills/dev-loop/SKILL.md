@@ -91,9 +91,10 @@ worktree. Every brief you write in Phases 4, 5 and 8 **must** open with this pre
 with the placeholders filled in:
 
 ```
-Work exclusively inside <ABSOLUTE worktree path>. Begin every Bash call by cd-ing there,
-and treat every file path as relative to it. Never read or edit anything under
-<ROOT> outside that worktree — it is a separate checkout of the same repo.
+Work exclusively inside <UWT, the unit's own worktree>. Begin every Bash call by cd-ing
+there, and treat every file path as relative to it. Never read or edit anything outside
+that worktree — <ROOT> and its other worktrees are separate checkouts. The harness may
+announce a different working directory at session start; the path above wins.
 
 Files you own (create/edit only these): <explicit list from the plan>
 If your work requires touching a file you do not own, stop and report it instead of
@@ -102,6 +103,10 @@ editing it.
 Your unit: <verbatim excerpt from PLAN.md>
 Done when: <that unit's acceptance criteria>
 Before returning, run: <the profile's test command, scoped to your files>
+
+Before returning, commit on your branch: `git add -A && git commit -m 'unit <n.m>:
+<name>'` — only committed content merges; anything left uncommitted is sealed by the
+orchestrator and logged as a brief violation.
 
 Return a handoff with exactly these four headings and nothing else:
 CHANGED — each file you touched and what the change does.
@@ -238,34 +243,60 @@ decomposition is being padded with prose — cut the prose, not the units. It mu
 
 Do not implement anything yourself.
 
-- Walk the waves **in order**. For each wave, spawn one **sonnet** agent per unit, all in
-  a single message so they run concurrently, each with the brief contract preamble and
-  only its own owned files.
-- If the profile names specialist subagent types for this stack, pass the matching one as
-  `subagent_type` (e.g. a model/migration unit → `roundhouse:rails-models`). This gives
-  you their expertise while keeping *your* plan, *your* ownership boundaries and *your*
-  wave ordering — do not delegate the whole feature to another orchestrating skill, which
-  would re-plan the work against a different contract.
-- **After each wave**, run the profile's test command before starting the next. A broken
-  wave 1 makes every downstream wave garbage.
-- **A failed unit is re-dispatched once, then the loop stops.** If a unit agent errors out,
-  returns without meeting its "done when", or leaves the wave red, re-dispatch that unit
-  **once** to a fresh agent with the same brief plus the failed handoff. If the wave is
-  still red after that, stop before the next wave: record what failed in `LOOP_STATE.md`,
-  still run Phase 9's learnings step, and report to the user. Never finish a unit's work
-  yourself — an orchestrator that starts implementing is the pathology this phase exists to
-  prevent — and never re-plan around the failure, which is the user's decision, not yours.
-- **Enforce ownership after each wave — mechanically, not on trust.** Run
-  `git status --porcelain` in the worktree and check every changed path against that
-  wave's declared ownership. The brief already tells agents to stay inside their set and
-  it was breached in *every* benchmark run, so the instruction alone does not hold. For
-  anything outside: amend `PLAN.md` only if the file is genuinely required by an acceptance
-  criterion that unit owns, and record the amendment for the rater; otherwise revert it.
-  Amending because the agent already wrote it turns the contract into a transcript of
-  whatever happened. Never start the next wave with an unresolved violation, and never let
-  an undeclared file reach the rating phase unexplained.
-- If an agent reports it needed a file it did not own, resolve the overlap yourself,
-  update `PLAN.md`, and note the amendment — do not let two agents fight over a file.
+Each unit runs in its own worktree, branched from `$BR`: only committed content merges,
+so a stray edit to another unit's file is caught before it reaches the loop tree, and one
+worker's build artifacts (a built stylesheet, a screenshot directory) cannot move
+another's measurements.
+
+Walk the waves **in order**. For each wave:
+
+- **Provision every unit before dispatch**, serially, one Bash call per unit
+  (`timeout: 600000`): `UWT="$WT-u<n.m>"; UBR="$BR-u<n.m>"; git worktree add "$UWT" -b
+  "$UBR" "$BR"`, then copy the profile's local-config files from `$ROOT` and run the
+  profile's install/prepare, timing each step with `$SECONDS` into `LOOP_STATE.md`'s
+  `Trace`.
+- **Dispatch** one **sonnet** agent per unit, all in a single message so they run
+  concurrently, each with the brief contract preamble (`<UWT>` = that unit's own
+  worktree) and only its own owned files. If the profile names specialist subagent types
+  for this stack, pass the matching one as `subagent_type` (e.g. a model/migration unit →
+  `roundhouse:rails-models`). This gives you their expertise while keeping *your* plan,
+  *your* ownership boundaries and *your* wave ordering — do not delegate the whole
+  feature to another orchestrating skill, which would re-plan the work against a
+  different contract.
+- **While any unit is live, write only to `$WT`** — merges, `HANDOFFS.md`,
+  `LOOP_STATE.md` — and to the worktree of a unit that has handed off; never a live one.
+- **On each handoff that meets its done-when, in `$WT`:** if `$UWT` is dirty, seal it
+  (`git -C "$UWT" add -A && git -C "$UWT" commit -m 'unit <n.m>: sealed by orchestrator'`)
+  and log it as a brief violation. Run `git diff --name-only --no-renames "$BR...$UBR"`
+  and check every path against the unit's declared ownership: a stray is dropped on
+  `$UBR` (`git -C "$UWT" checkout "$(git merge-base "$BR" "$UBR")" -- <p>`, or
+  `git -C "$UWT" rm -q <p>` for a new file, then `git -C "$UWT" commit -m 'unit <n.m>:
+  drop stray <p>'`) or `PLAN.md` is
+  amended, only if the file is genuinely required by an acceptance criterion that unit
+  owns — amending because the agent already wrote it turns the contract into a transcript
+  of whatever happened. Log whichever happened in `Trace`. Then `git merge --no-ff
+  "$UBR" -m "unit <n.m>: <name>"`; nonzero exit (conflict or refusal) → the unit is
+  failed, below — abort a conflicted merge (`git merge --abort`; a refusal leaves nothing
+  to abort). On success: plain `git worktree remove "$UWT" && git branch -d "$UBR"`, and
+  the `Units:` line becomes `merged@<sha>`.
+- **After each wave's last merge**, re-run the profile's install/prepare in `$WT` and
+  record its seconds, then run the profile's test command before starting the next wave —
+  a broken wave 1 makes every downstream wave garbage. **On the last wave, this test run
+  IS Phase 5's test check** — one run on the unchanged tree, not two.
+- **Read the handoff before sealing or merging**: a NOT DONE that leaves the done-when
+  unmet routes here, not to the merge. **A unit that errors out or returns without
+  meeting its done-when is re-dispatched once**, into the same worktree, with the same
+  brief plus the failed handoff — no re-provision, the partial work is its starting
+  point. **A conflict or refusal after a passing diff check is not the worker's to
+  retry**: a conflict means two ownership sets overlapped, a refusal means `$WT`'s own
+  state — record it and stop (`Units:` → `stopped`), the same as a second failure below.
+  **A red post-wave test is repaired through Phase 5's repair path, by reference, and
+  consumes no re-dispatch.** If a re-dispatched unit fails again, `git worktree remove
+  --force "$UWT"` (branch kept), and stop before the next wave (`Units:` → `stopped`):
+  record what failed in `LOOP_STATE.md`, still run Phase 9's learnings step, and report
+  to the user. Never finish a unit's work yourself — an orchestrator that starts
+  implementing is the pathology this phase exists to prevent — and never re-plan around
+  the failure, which is the user's decision, not yours.
 - **Collect the handoffs and answer them — silence is not allowed.** Append each unit's
   four-field handoff verbatim to `HANDOFFS.md` in the worktree. Before the next wave, every
   `DEVIATIONS` and `CONCERNS` entry gets one of two dispositions: an amendment to `PLAN.md`,
@@ -288,9 +319,11 @@ install/build · tests · lint · typecheck · security scan — whichever the p
   ablation arm carrying this floor beat the arm carrying only a written caution on test
   quality in both blind pairings.
 - Any check the profile doesn't define is **skipped and reported as skipped**.
-- If red: dispatch **sonnet** agents to repair, then re-run. This is repair, not a fix
-  round — it does not consume the fix-round cap, but cap it at 3 attempts and stop if the
-  same failure survives all three.
+- If red: dispatch **sonnet** agents to repair through the Phase 4 per-unit protocol,
+  with the ownership set declared by the orchestrator from the failing check, then
+  re-run. This is repair, not a fix round — it does not consume the fix-round cap, but
+  cap it at 3 attempts and stop if the same failure survives all three. Repair units are
+  numbered `5.<n>`, fix units (Phase 8) `8.<n>`.
 - Nothing proceeds to Phase 6 on red.
 
 ## Phase 6 — Adversarial review
@@ -400,8 +433,9 @@ The 1–10 scores never gate anything — they go in the PR body as telemetry. T
 deliberate: an unanchored self-report clustered in the 7–9 band is not a control.
 
 - **Gate met** → Phase 9.
-- **Not met** → dispatch **sonnet** agents (brief contract preamble, ownership from the
-  plan) to fix the BLOCKING findings first, then the MAJORs. A fix must be the smallest
+- **Not met** → dispatch **sonnet** agents through the Phase 4 per-unit protocol, with
+  the ownership set declared by the orchestrator from the finding, to fix the BLOCKING
+  findings first, then the MAJORs. A fix must be the smallest
   change that resolves the finding: fix rounds are where scaffolding accretes, because
   adding code always looks like progress. Removing implementation code is a legitimate fix.
   **Never satisfy a disproportion finding by weakening a test.** Dropping an assertion,
@@ -430,8 +464,12 @@ deliberate: an unanchored self-report clustered in the 7–9 band is not a contr
    pattern worth repeating, a recurring adversarial challenge, a place the plan was
    wrong. Map, not diary. Nothing user-specific or secret. **Run this step even when the
    loop stopped at the gate** — failed runs teach the most.
-2. **Commit.** Nothing before this phase commits, so the worktree is dirty. Stage
-   everything and commit with a conventional message referencing the plan.
+2. **Commit.** Unit work is already committed on `$BR` as merge commits from Phase 4;
+   this step commits only the loop's own artifacts. Stage BY NAME — `PLAN.md`,
+   `PLAN-CRITIQUE.md`, `HANDOFFS.md`, `LOOP_STATE.md`, `REVIEW-round-*.md`,
+   `RATING-round-*.md`, and the learnings file — and commit with a conventional message
+   referencing the plan. Anything else untracked in `$WT` is reported to the user, never
+   staged: a blind `git add -A` once swept up a rater's probe file.
 3. **Push, then open the PR — these are two separate decisions.**
    - **Push whenever the repo has a git remote**, regardless of `GH`:
      `cd "$WT" && git push -u origin "$BR"`. Pushing is git; a repo can have a perfectly
@@ -480,22 +518,30 @@ Task: <problem statement>   Tier: <Light|Full>   Mode: <checkpointed|autonomous>
 Worktree: <path>   Branch: <name>   Base: <MAIN>@<sha>
 Baseline: <each check: pass | fail | skipped>
 Phase: <n — name>   Fix round: <n of cap>
+Units: <one line per unit: n.m — provisioned | live | merged@sha | failed | stopped>
 Amendments & rebuttals: <one line each, from ownership checks and handoffs>
 Degraded: <in-family review | skipped checks | no specialist agents | none>
 Trace: <per phase — wall clock, agents spawned, repair attempts, ownership violations,
-        findings by severity, waivers and their grounds>
+        findings by severity, waivers and their grounds; per unit — one line: provision
+        and `$WT` re-prepare seconds, merges, strays, refusals/conflicts, seals>
 Gate: <green | blocked by …>
 ```
 
-If the loop is interrupted, a later run reads this and resumes instead of starting over.
-`Trace` is what Phase 9 reports in the PR body, and since the file is committed with the
-branch it is also the only record of what a run actually cost once the session is gone.
+If the loop is interrupted, a later run reads this and resumes instead of starting over —
+every unit marked `provisioned` or `live` is torn down (`git worktree remove --force
+"$UWT"; git branch -D "$UBR"`) and dispatched fresh, not consuming its one re-dispatch. A
+`stopped` unit is never re-dispatched by resume — the loop halted on it and that call
+stays with the user — nor is a `failed` one, whose kept worktree is already Phase 4's
+re-dispatch target. `Trace` is what Phase 9 reports in the PR body, and since the file
+is committed with the branch it is also the only record of what a run actually cost once
+the session is gone.
 
 ## Guardrails
 
 - **Cost is real, and it compounds.** Parallel army × review passes × fix rounds. The
   Phase 1 tier decision and the fix-round cap are the two brakes — use both.
-- **Never edit the main checkout after Phase 2.** Every path is worktree-relative.
+- **Never edit the main checkout after Phase 2.** Every path is worktree-relative, and
+  never enter a live unit's worktree.
 - **The plan is the contract.** If implementation proves it wrong, amend `PLAN.md`,
   record the amendment, and make sure the rating judges the amendment too. Amending the
   contract to make the work look faithful is the one way to cheat this loop.

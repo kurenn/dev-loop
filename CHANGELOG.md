@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.4.0 (unreleased)
+
+Phase 4 ran every unit of a wave in one shared worktree, ownership enforced only by the
+0.2.3 post-wave `git status --porcelain` check — structurally blind to a transient edit
+and to one worker's asset rebuild moving another's measurements (coba-ai/olympus2#271).
+
+- **Each unit in Phases 4, 5 (repair) and 8 (fix) now runs in its own worktree**, branched
+  from the loop branch and provisioned before the agent is dispatched. Workers commit on
+  their own branch; on handoff the orchestrator diffs that branch against the unit's
+  declared ownership *before* merging, drops any stray path on the unit's branch first,
+  then lands one `git merge --no-ff` into the loop branch — serially, in arrival order. A
+  conflict after a passing ownership check is a plan defect and stops the loop; an agent
+  that errors out or misses its done-when is re-dispatched once into the same
+  worktree. The porcelain paragraph, the transient-edit hazard it never caught, and the
+  shared-asset corruption path it couldn't see either are gone, replaced by a check that
+  runs before a breach reaches the loop tree instead of after.
+- **Isolation costs one provision per unit.** Measured in the trial (coba-ai/olympus2#302,
+  a private repo, 2026-09-21, a Rails app, warm gem cache): 13.4–14.7 s cold (worktree add
+  ~0, key copy ~0, bundle 1 s, `db:prepare` dev 9 s, test 2 s, stylesheet build 1–3 s),
+  5.2–7.8 s warm (path-derived databases already existed). 7 merges, 0 conflicts, 0
+  refusals, 0 strays, 0 seals: 0.02–0.05 s/merge, 0.4–0.6 s/handoff, loop-worktree
+  re-prepare 3.4–4.0 s after each merge. A mid-wave kill exercised resume: both live units
+  torn down and re-dispatched in 76 s; plain `git worktree remove` refused the dirty tree,
+  `--force` did not. The real cost is worktree count, not seconds: repair and fix units
+  get worktrees too, so this one Light run (2 units, 2 repairs, 3 fixes) made 7 worktrees
+  and left 35 databases (295 MB) behind, invisible to that repo's reaper at this version;
+  teardown stays a named follow-up.
+
+Not benchmarked — one trial, n=1, no A/B, the same standard the 0.3.0 entry below sets.
+The default-or-not gate fired on one of its four rules — two improvisations outside the
+per-unit mechanism itself: the plan cap had no budget for Phase 3's critique edits, and
+the last wave's test run was undefined text — the latter fixed here. The mechanism above
+is recommended as the default on that evidence; the record — olympus2's
+`docs/plans/PLAN.agentic-stack-remediation.md`, W3 item 4 — is what a reader should weigh.
+
 ## 0.3.0
 
 Four changes to how information moves between the agents, from reading Cursor's *Towards
