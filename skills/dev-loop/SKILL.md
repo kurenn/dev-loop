@@ -70,18 +70,25 @@ Record these; every later phase uses them. Then:
 | Phase | Who | Model |
 |---|---|---|
 | 1 Triage & frame | you | this session |
-| 2 Plan | one agent | **fable** |
-| 3 Critique → revise | one *fresh* critic; you apply its edits | **fable** |
+| 2 Plan | one agent | **claude-opus-5-5** |
+| 3 Critique → revise | one *fresh* critic; you apply its edits | **claude-opus-5-5** |
 | 4 Execute | unit agents, parallel within a wave | **sonnet** |
 | 5 Mechanical gate | you (repairs by sonnet agents) | — |
 | 6 Adversarial review | Codex, else a fresh agent | external / **fable** |
-| 7 Rate | a fresh, threshold-blind rater | **opus** |
+| 7 Rate | a fresh, threshold-blind rater | **claude-opus-5-5** |
 | 8 Fix | unit agents | **sonnet** |
 | 9 Learnings & ship | you | this session |
 
 Pass these as `model:` on the Agent tool. You **cannot** set your own model — if this
 session is not running a strong model, say so once and continue; the phase models still
 apply to the agents you spawn.
+
+Phases 2, 3 and 7 name a pinned model ID rather than an alias on purpose: the `opus` alias
+tracks a provider's *recommended* Opus, which lags the newest one by several versions and
+differs per provider, so it is not a way to ask for Opus 5.5. Phase 7 is pinned hardest of
+the three — it is the only agent whose output the gate reads, so it is the one place a
+silent change of model changes what the loop will ship. Where a row names an alias, any
+current model of that family is fine and the alias is the better choice.
 
 ## The agent brief contract
 
@@ -138,7 +145,7 @@ main checkout.
    and stop — every later phase depends on knowing how to build and test it.
 4. Restate the request as a crisp problem statement. Carry it into Phase 2 verbatim.
 
-## Phase 2 — Plan (fable)
+## Phase 2 — Plan (claude-opus-5-5)
 
 **2a — Create and provision the worktree.** Never work on `$MAIN` directly.
 
@@ -161,11 +168,12 @@ git worktree add "$WT" -b "$BR" "$MAIN"
 - If the baseline cannot be made to run at all, **stop** and report exactly which command
   failed and what is missing. Do not implement against a broken environment.
 
-**2b — Write `PLAN.md` in the worktree.** Spawn one **fable** agent with the brief
-preamble, and give it the **tier's plan cap** as a hard limit (Light 120 lines, Full 300).
-`PLAN.md` is a work contract, not a design essay: it is the decomposition the army
-executes and the criteria the work is judged against. If it does not fit the cap, the
-decomposition is being padded with prose — cut the prose, not the units. It must contain:
+**2b — Write `PLAN.md` in the worktree.** Spawn one **claude-opus-5-5** agent with the
+brief preamble, and give it the **tier's plan cap** as a hard limit (Light 120 lines,
+Full 300). `PLAN.md` is a work contract, not a design essay: it is the decomposition the
+army executes and the criteria the work is judged against. If it does not fit the cap,
+the decomposition is being padded with prose — cut the prose, not the units. It must
+contain:
 
 - **Problem & acceptance criteria** — a checklist, each item independently verifiable.
 - **Scope** — explicitly in and explicitly out.
@@ -199,10 +207,10 @@ decomposition is being padded with prose — cut the prose, not the units. It mu
 
 ## Phase 3 — Critique the plan, then revise it
 
-1. Spawn **one fresh fable** agent — a different agent, not the planner. Give it only the
-   original request and `PLAN.md`; it must not see the planner's reasoning. Brief it to
-   attack: wrong problem framing, missing acceptance criteria, ownership collisions
-   between units in the same wave, wave-ordering errors, unstated assumptions,
+1. Spawn **one fresh claude-opus-5-5** agent — a different agent, not the planner. Give
+   it only the original request and `PLAN.md`; it must not see the planner's reasoning.
+   Brief it to attack: wrong problem framing, missing acceptance criteria, ownership
+   collisions between units in the same wave, wave-ordering errors, unstated assumptions,
    under-tested risk, scope creep, and cheaper approaches that were not considered.
 
    **Bound it.** Judge the plan against the request and the repo *as it stands*. Do not
@@ -328,10 +336,10 @@ and therefore weaker.
 
 Write the findings verbatim to `REVIEW-round-N.md` in the worktree. Fix nothing here.
 
-## Phase 7 — Rate (fresh opus, threshold-blind)
+## Phase 7 — Rate (fresh claude-opus-5-5, threshold-blind)
 
-Spawn one **opus** agent per round. It must not edit code. It has never seen this skill,
-so give it everything it needs. Do **not** tell it the gate. Use this brief:
+Spawn one **claude-opus-5-5** agent per round. It must not edit code. It has never seen
+this skill, so give it everything it needs. Do **not** tell it the gate. Use this brief:
 
 ```
 You are an independent reviewer. You did not write this code. Judge it; do not change it.
@@ -378,6 +386,23 @@ Critical paths in this change: <from the profile, or "none">
 
 Write the result to `RATING-round-N.md`.
 
+**Second opinion on the margin.** If the rating comes back with **no BLOCKING finding but
+at least one MAJOR**, spawn one more rater — same brief, same inputs, a fresh agent that
+has not seen the first rating — and write it to `RATING-round-N-b.md`. Merge the two: keep
+every finding either one raised, and where both describe the same issue at different
+severities, **the higher severity stands**. Gate on the merge.
+
+Only that band gets a second look. A BLOCKING finding already fails the gate, so
+confirming it buys nothing, and a rating whose worst item is MINOR is not near a decision.
+The MAJOR band is the one place a single opinion decides whether the loop ships.
+
+Measured: asked five times about identical code, the rater called the same real defect
+BLOCKING three times and MAJOR twice — so the gate was faithfully executing a coin flip.
+Taking the higher of two opinions cuts wrong gate outcomes on that corpus from 7% to 2%,
+and costs nothing in false blocks, because the change with nothing wrong never reached
+BLOCKING on any rep. That last half rests on a single clean variant in a single corpus,
+which is the weaker half of the evidence.
+
 ## Phase 8 — Gate & fix
 
 **The gate is mechanical, not numeric.** It passes when all three hold:
@@ -409,10 +434,10 @@ deliberate: an unanchored self-report clustered in the 7–9 band is not a contr
   first build with disproportion enforced lost the assertion pinning an `:id` tiebreaker
   and weakened a page-cap check to a bound its fixture could not exercise. Coverage may
   only fall when the code it covered is gone. Then **re-run Phase 5**, and
-  re-run Phase 7 as a **delta judgment**: give the new rater `RATING-round-N.md` plus the
-  diff since the fix, and ask it to verify each prior finding was actually addressed and
-  to flag anything the fix broke. Delta judgment is better calibrated and far cheaper
-  than re-rating from scratch.
+  re-run Phase 7 as a **delta judgment**: give the new rater the round's rating — both
+  files if a second opinion was taken — plus the diff since the fix, and ask it to verify
+  each prior finding was actually addressed and to flag anything the fix broke. Delta
+  judgment is better calibrated and far cheaper than re-rating from scratch.
 - Re-run Phase 6 on a fix round only if the fix touched a critical path or changed the
   approach; otherwise the delta judgment is enough.
 - **Respect the fix-round cap** from the Phase 1 tier (Light 1, Full 2). If BLOCKING

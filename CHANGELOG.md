@@ -1,5 +1,38 @@
 # Changelog
 
+## Unreleased
+
+**Phases 2, 3 and 7 move to a pinned `claude-opus-5-5`.** The pin is not decoration: the
+`opus` alias resolves to a provider's *recommended* Opus, which trails the newest release
+and differs per provider, so naming the alias is not a way to ask for Opus 5.5. Phase 6's
+fallback still names an alias, deliberately — it does not ask for a specific version.
+
+Phase 7 is the consequential one, and it comes with a correction. The rater has always
+been spawned as `opus`, so every rating this project has ever recorded — including every
+number in `bench/RESULTS.md` — was made by whatever Opus the provider recommended at the
+time, which the docs put two to four minor versions behind the current release. Results
+collected before this change were not produced by the model the write-ups call "opus", and
+a rating is the only agent output the gate reads, so this is the one model substitution
+that can silently change what the loop ships.
+
+**Phase 7 takes a second opinion on the margin.** When a rating returns no BLOCKING but at
+least one MAJOR, a second independent rater runs on the same inputs and the two are merged
+with the higher severity winning. A BLOCKING already fails the gate and a MINOR is nowhere
+near one, so only the band where a single opinion decides the outcome pays for the extra
+call.
+
+The reason is the Tier 2 corpus rather than taste: asked five times about identical code,
+the rater called the same real defect BLOCKING three times and MAJOR twice. That is not a
+gate failure — the gate executed faithfully — it is an unstable judgement upstream of
+every rule the gate applies, and no amount of waiver prose reaches it. Resampling those
+reps in pairs puts wrong gate outcomes at 2% against 7% for a single rater, with no false
+blocks, though the false-block half rests on one clean variant in one corpus and is the
+weaker claim.
+
+**Neither change has been measured end to end**, and per the rule added last release it
+cannot be until the arms are run interleaved in a single session. The 2%-versus-7% figure
+is resampled from ratings already collected, not from a live two-rater run.
+
 ## 0.3.0
 
 Four changes to how information moves between the agents, from reading Cursor's *Towards
