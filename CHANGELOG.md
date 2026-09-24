@@ -1,6 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.4.0
+
+0.3.0 was written up below but never tagged or published, so the last installable release
+is 0.2.6. Installing 0.4.0 brings both batches; read the 0.3.0 entry as part of this one.
 
 **Phases 2, 3 and 7 move to a pinned `claude-opus-5-5`.** The pin is not decoration: the
 `opus` alias resolves to a provider's *recommended* Opus, which trails the newest release
@@ -28,6 +31,17 @@ every rule the gate applies, and no amount of waiver prose reaches it. Resamplin
 reps in pairs puts wrong gate outcomes at 2% against 7% for a single rater, with no false
 blocks, though the false-block half rests on one clean variant in one corpus and is the
 weaker claim.
+
+**The Tier 2 harness gained the instrument that produced that figure.** `score.py` now
+reports the top severity each rep assigned, which is the only thing the gate acts on and
+the thing a findings count hides; it also tells a run refused by the API apart from a rater
+returning nonsense, and prints `RUN VOID` rather than a table when refusals outnumber
+answers — a calibration run that reported a clean $0.00 result is what prompted that.
+`replay.sh` discovers arms dynamically and alternates them call by call, applying last
+release's interleave rule to Tier 2. The current Phase 7 brief joins as a third arm in
+`raters/v0.3.md`, with a header recording that it drops `PLAN-CRITIQUE.md` and
+`HANDOFFS.md` because a static corpus cannot supply them, so it isolates the rating brief
+rather than all of v0.3's Phase 7.
 
 **Neither change has been measured end to end**, and per the rule added last release it
 cannot be until the arms are run interleaved in a single session. The 2%-versus-7% figure
