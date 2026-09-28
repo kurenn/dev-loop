@@ -40,3 +40,9 @@ One corpus, one clean variant, one session. It measures the rating brief in isol
 not a live loop. Criterion 2 is the weak one: a stricter "met" rule could raise false
 blocks on correct code whose criteria are covered only indirectly, and `good` is the only
 variant that can show it.
+
+## Deviation, recorded before results
+
+The six variants ran as six concurrent `replay.sh` processes sharing one stamp, to cut
+wall clock from ~4 h to ~40 min. Within each variant the arms still alternate call by
+call, so the between-arm comparison keeps its interleave; only the variants overlap.
