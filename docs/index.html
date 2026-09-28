@@ -1,125 +1,315 @@
-<title>dev-loop</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+
+<title>dev-loop — a development loop that won't ship while anything is blocking</title>
+<meta name="description" content="A development loop for Claude Code: plan, critique, implement in parallel, gate, review adversarially, rate, and ship only on zero blocking findings." />
+
+<meta property="og:type" content="website" />
+<meta property="og:url" content="https://kurenn.github.io/dev-loop/" />
+<meta property="og:title" content="dev-loop" />
+<meta property="og:description" content="A development loop for Claude Code that won't ship while anything is blocking." />
+<meta name="twitter:card" content="summary" />
+
 <style>
+  /* Omarchy's default theme, Tokyo Night, taken from its colors.toml.
+     No webfonts, no CDN, no external requests — the page is self-contained. */
   :root {
-    --bg:   #F7F6F4;
-    --fg:   #17181A;
-    --dim:  #6B6E74;
-    --rule: #C9C7C2;
-    --link: #9A5B18;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      --bg:   #0A0A0B;
-      --fg:   #D6D7DA;
-      --dim:  #74777E;
-      --rule: #2A2B2F;
-      --link: #D79A4E;
-    }
-  }
-  :root[data-theme="dark"] {
-    --bg:#0A0A0B; --fg:#D6D7DA; --dim:#74777E; --rule:#2A2B2F; --link:#D79A4E;
+    color-scheme: dark;
+    --ground: #1a1b26;
+    --ink:    #c0caf5;
+    --text:   #a9b1d6;
+    --dim:    #565f89;
+    --muted:  #414868;
+    --blue:   #7aa2f7;
+    --violet: #bb9af7;
+    --green:  #9ece6a;
+    --red:    #f7768e;
+    --sel:    #292e42;
   }
 
-  html { -webkit-text-size-adjust: 100%; }
+  * { box-sizing: border-box; }
+
+  html, body { overflow-x: hidden; }
+
   body {
-    margin: 0 auto; padding: clamp(40px, 9vh, 96px) 24px 64px;
-    max-width: 820px;
-    background: var(--bg); color: var(--fg);
-    font-family: ui-monospace, "JetBrains Mono", "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
-    font-size: 14px; line-height: 1.75;
+    background: var(--ground);
+    color: var(--text);
+    font-family: ui-monospace, "JetBrainsMono Nerd Font", "JetBrains Mono", "SF Mono",
+                 SFMono-Regular, "Cascadia Code", Menlo, Consolas, "Liberation Mono", monospace;
+    font-size: 15px;
+    line-height: 1.8;
+    margin: 0;
+    padding: clamp(2.5rem, 9vw, 6rem) clamp(1.1rem, 5vw, 3rem) 5rem;
     -webkit-font-smoothing: antialiased;
   }
 
-  h1 { font-size: 14px; font-weight: 700; margin: 0; letter-spacing: .02em; }
-  .tagline { margin: 0 0 4px; color: var(--fg); }
-  .bar {
-    color: var(--rule); margin: 22px 0; white-space: nowrap; overflow: hidden;
-    user-select: none; letter-spacing: -.5px;
-  }
-  p { margin: 0 0 4px; }
-  .dim { color: var(--dim); }
+  ::selection { background: var(--sel); color: var(--ink); }
 
-  ul { list-style: none; margin: 0; padding: 0; }
-  li { margin: 0; }
-  li::before { content: "- "; color: var(--dim); }
-
-  nav { display: flex; gap: 22px; flex-wrap: wrap; }
-  a { color: var(--link); text-decoration: none; }
-  a:hover, a:focus-visible { text-decoration: underline; }
-  a:focus-visible { outline: 1px solid var(--link); outline-offset: 3px; }
-
-  .col { display: flex; flex-direction: column; gap: 26px; }
-  .row {
-    display: grid; grid-template-columns: 1fr max-content;
-    gap: 44px; align-items: start;
-  }
-  @media (max-width: 760px) {
-    .row { grid-template-columns: 1fr; gap: 26px; }
+  main {
+    max-width: 44rem;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 2.4rem;
   }
 
-  figure { margin: 0; }
-  figure pre {
-    margin: 0; font: inherit; line-height: 1.35; color: var(--fg);
-    overflow-x: auto; padding-bottom: 4px;
-  }
+  /* Both <pre> blocks are measured and scaled to their box by script, so
+     neither can overflow and no scrollbar is ever created. */
+  .fit { width: 100%; }
+  pre.fitted { margin: 0; white-space: pre; font-size: 16px; }
 
-  footer { color: var(--dim); }
+  /* The logo is painted with a gradient; glyphs still scrambling during the
+     decrypt override the fill with a solid colour. */
+  pre.logo {
+    line-height: 1.05; font-weight: 700;
+    background: linear-gradient(90deg, var(--blue), var(--violet));
+    -webkit-background-clip: text; background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  pre.logo .s  { -webkit-text-fill-color: var(--muted); }
+  pre.logo .s2 { -webkit-text-fill-color: var(--dim); }
+
+  p { margin: 0; max-width: 70ch; text-wrap: pretty; }
+
+  /* A tile, the way Hyprland draws the focused window under Omarchy:
+     square corners, a 2px accent border. */
+  .tile { border: 2px solid var(--blue); padding: 1rem 1.2rem; }
+
+  /* Pixel field in the side margins; drawn by script, hidden when the
+     margins are too narrow to hold it. */
+  #px { position: fixed; inset: 0; width: 100%; height: 100%; z-index: -1; pointer-events: none; }
+
+
+  pre.run { line-height: 1.75; color: var(--muted); }
+  pre.run .cmd  { color: var(--dim); }
+  pre.run .name { color: var(--ink); }
+  pre.run .det  { color: var(--dim); }
+  pre.run .spin { color: var(--blue); }
+  pre.run .tick { color: var(--green); }
+  pre.run .bad  { color: var(--red); }
+
+  nav { display: flex; flex-wrap: wrap; gap: 1.5rem; }
+  nav a {
+    color: var(--blue); text-decoration: none;
+    border-bottom: 1px solid transparent;
+  }
+  nav a:hover, nav a:focus-visible { border-bottom-color: var(--blue); }
+  nav a:focus-visible { outline: 2px solid var(--blue); outline-offset: 4px; }
+  nav .b { color: var(--dim); }
+
+  footer { color: var(--dim); font-size: .82rem; }
 </style>
+</head>
+<body>
 
-<h1>dev-loop</h1>
-<p class="tagline">A development loop for Claude Code that won't ship while anything is blocking.</p>
+<canvas id="px" aria-hidden="true"></canvas>
 
-<p class="bar">▄▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁</p>
+<main>
+  <header>
+    <div class="fit">
+<pre class="fitted logo" role="img" aria-label="dev-loop">████████▄     ▄████████  ▄█    █▄         ▄█        ▄██████▄   ▄██████▄     ▄███████▄
+███   ▀███   ███    ███ ███    ███       ███       ███    ███ ███    ███   ███    ███
+███    ███   ███    █▀  ███    ███       ███       ███    ███ ███    ███   ███    ███
+███    ███  ▄███▄▄▄     ███    ███  ▄▄▄▄ ███       ███    ███ ███    ███   ███    ███
+███    ███ ▀▀███▀▀▀     ███    ███  ▀▀▀▀ ███       ███    ███ ███    ███ ▀█████████▀
+███    ███   ███    █▄  ███    ███       ███       ███    ███ ███    ███   ███
+███   ▄███   ███    ███ ███    ███       ███▌    ▄ ███    ███ ███    ███   ███
+████████▀    ██████████  ▀██████▀        █████▄▄██  ▀██████▀   ▀██████▀   ▄████▀
+                                         ▀</pre>
+    </div>
+  </header>
 
-<div class="row">
-<div class="col">
-<ul>
-  <li>Plans with Opus 5.5, then critiques the plan with a second Opus 5.5 that never saw the first.</li>
-  <li>Implements in parallel with sonnet agents, each owning a disjoint set of files.</li>
-  <li>Gates on build, test, lint, typecheck and coverage before spending on review.</li>
-  <li>Reviews adversarially with Codex, then rates with a threshold-blind opus.</li>
-  <li>Ships on zero blocking findings — a severity, not a score.</li>
-  <li>Any stack. Setup detects and verifies your project's own commands.</li>
-</ul>
+  <p>A development loop for Claude Code. It won't ship while anything is blocking.</p>
 
-<nav>
-  <a href="https://github.com/kurenn/dev-loop">GitHub</a>
-  <a href="https://github.com/kurenn/dev-loop/blob/main/bench/RESULTS.md">Benchmark</a>
-  <a href="https://github.com/kurenn/dev-loop/blob/main/CHANGELOG.md">Changelog</a>
-</nav>
+  <div class="fit tile">
+    <pre class="fitted run" role="img" aria-label="A dev-loop run: plan, critique, approve, implement, gate, review and rate. The rating finds one blocking issue, so a fix round runs the gate, review and rate again. With zero blocking findings it ships and opens a pull request."></pre>
+  </div>
 
-<footer>MIT license. © 2026 Abraham Kuri</footer>
-</div>
+  <nav>
+    <span><span class="b">[</span><a href="https://github.com/kurenn/dev-loop">GitHub</a><span class="b">]</span></span>
+    <span><span class="b">[</span><a href="https://github.com/kurenn/dev-loop/blob/main/bench/RESULTS.md">Benchmark</a><span class="b">]</span></span>
+    <span><span class="b">[</span><a href="https://github.com/kurenn/dev-loop/blob/main/CHANGELOG.md">Changelog</a><span class="b">]</span></span>
+  </nav>
 
-<figure>
-<pre role="img" aria-label="Flow diagram. Plan, critique and approve run in sequence, then implement. From there the mechanical gate leads to review, then rate, then a blocking-findings check. If nothing is blocking the work ships. If something is blocking it goes to fix, which returns to the mechanical gate.">
-       plan
-        │
-        ▼
-       critique
-        │
-        ▼
-       approve
-        │
-        ▼
-       implement
-        │
-        ▼
- ┌──▶  gate
- │      │
- │      ▼
- │     review
- │      │
- │      ▼
- │     rate
- │      │
- │      ▼
- │     blocking? ── none ──▶ ship
- │      │
- │      │ some
- │      ▼
- └───── fix
-</pre>
-</figure>
-</div>
+  <footer>MIT license. © 2026 Abraham Kuri</footer>
+</main>
+
+<script>
+(function () {
+  var reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ── fit any <pre> to its box ───────────────────────────────────
+     Monospace advance varies by font, so width can't be derived from
+     em arithmetic. Measure the rendered block and scale to match. */
+  var BASE = 16;
+  function fitAll() {
+    document.querySelectorAll('pre.fitted').forEach(function (pre) {
+      var box = pre.parentElement, max = +(pre.dataset.max || 17);
+      var inner = box.clientWidth - parseFloat(getComputedStyle(box).paddingLeft)
+                                  - parseFloat(getComputedStyle(box).paddingRight);
+      pre.style.fontSize = BASE + 'px';
+      var natural = pre.scrollWidth;
+      if (!natural) return;
+      pre.style.fontSize = Math.min(BASE * (inner / natural), max) + 'px';
+    });
+  }
+
+  /* ── the logo: decrypt ───────────────────────────────────────────
+     Omarchy's screensaver runs its logo through terminal text effects;
+     this is the decrypt one. Every glyph cycles through noise, then
+     locks into place, left to right with jitter. Replacements are
+     one-for-one, so the fitted width never changes. */
+  var logo = document.querySelector('pre.logo');
+  var FINAL = logo.textContent;
+  var NOISE = '░▒▓▖▗▘▙▚▛▜▝▞▟■▪◆◇○●';
+
+  function decrypt() {
+    var lines = FINAL.split('\n'), width = 0;
+    lines.forEach(function (l) { width = Math.max(width, l.length); });
+    var lock = lines.map(function (l) {
+      return Array.from(l, function (ch, x) {
+        return ch === ' ' ? 0 : 250 + (x / width) * 1100 + Math.random() * 500;
+      });
+    });
+    var start = null;
+    requestAnimationFrame(function frame(now) {
+      if (start === null) start = now;
+      var t = now - start, done = true, out = '';
+      lines.forEach(function (l, y) {
+        Array.from(l).forEach(function (ch, x) {
+          if (ch === ' ' || t >= lock[y][x]) { out += ch; return; }
+          done = false;
+          var n = NOISE[Math.floor(Math.random() * NOISE.length)];
+          out += '<span class="' + (t > lock[y][x] - 250 ? 's2' : 's') + '">' + n + '</span>';
+        });
+        if (y < lines.length - 1) out += '\n';
+      });
+      logo.innerHTML = out;
+      if (!done) requestAnimationFrame(frame);
+      else logo.textContent = FINAL;
+    });
+  }
+
+  /* ── the run ─────────────────────────────────────────────────────
+     The phases of skills/dev-loop/SKILL.md, in order. The first
+     rating finds a blocking issue, so one fix round runs the gate,
+     review and rating again before it ships. */
+  var run = document.querySelector('pre.run');
+  run.dataset.max = 14;
+
+  var TASK  = 'add rate limiting to the public api';
+  var STEPS = [
+    { id: 'plan',      det: 'opus 5.5' },
+    { id: 'critique',  det: 'fresh opus 5.5' },
+    { id: 'approve',   det: 'you' },
+    { id: 'implement', det: 'sonnet ×3, disjoint files' },
+    { id: 'gate',      det: 'build test lint types coverage' },
+    { id: 'review',    det: 'codex, adversarial' },
+    { id: 'rate',      det: 'opus, threshold-blind', bad: '1 blocking' },
+    { id: 'fix',       det: 'round 1 of 2' },
+    { id: 'gate',      det: 'build test lint types coverage' },
+    { id: 'review',    det: 'codex, adversarial' },
+    { id: 'rate',      det: 'opus, threshold-blind', ok: '0 blocking' }
+  ];
+  var PAD = 11, STAGE = 850, HOLD = 4;
+  var SPIN = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏';
+
+  function pad(s) { return s + ' '.repeat(Math.max(1, PAD - s.length)); }
+
+  function render(stage, tick) {
+    var out = '<span class="cmd">&gt; /dev-loop ' + TASK + '</span>\n';
+    STEPS.forEach(function (s, i) {
+      var glyph, tail = '';
+      if (i < stage) {
+        glyph = s.bad ? '<span class="bad">✗</span>' : '<span class="tick">✓</span>';
+        if (s.bad) tail = '  <span class="bad">' + s.bad + '</span>';
+        if (s.ok)  tail = '  <span class="tick">' + s.ok + '</span>';
+      }
+      else if (i === stage) glyph = '<span class="spin">' + SPIN[tick % SPIN.length] + '</span>';
+      else                  glyph = '<span class="det">·</span>';
+      var id = i <= stage ? '<span class="name">' + pad(s.id) + '</span>' : pad(s.id);
+      out += '  ' + glyph + ' ' + id + '<span class="det">' + s.det + '</span>' + tail + '\n';
+    });
+    if (stage >= STEPS.length) {
+      out += '<span class="tick">✓</span> <span class="name">shipped — 0 blocking</span>'
+           + '<span class="det">  ·  1 fix round  ·  pr opened</span>';
+    }
+    return out;
+  }
+
+  /* Paint the tallest/widest frame first: the fit measures the real
+     maximum, and its height is locked in so earlier frames — which have
+     no completion line — don't make the page jump. */
+  function reserve() {
+    run.style.minHeight = '';
+    run.innerHTML = render(STEPS.length, 0);
+    fitAll();
+    run.style.minHeight = run.getBoundingClientRect().height + 'px';
+  }
+  reserve();
+  addEventListener('resize', reserve);
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(reserve);
+
+  /* ── the side margins: a pixel field ─────────────────────────────
+     Denser toward the screen edge, clear near the text. A few cells
+     re-roll every tick so it shimmers like the screensaver. */
+  var cv = document.getElementById('px'), cx = cv.getContext('2d');
+  var CELL = 14, DOT = 10, GAP = 48, cells = [];
+  var DARK = ['#1f2335', '#24283b', '#292e42', '#414868'], LIT = ['#7aa2f7', '#bb9af7', '#3d59a1'];
+
+  function roll(c) {
+    var r = Math.random();
+    c.fill = r > Math.pow(c.d, 1.6) * 0.6 ? null
+           : Math.random() < 0.07 ? LIT[Math.floor(Math.random() * LIT.length)]
+           : DARK[Math.floor(Math.random() * DARK.length)];
+  }
+  function draw(c) {
+    cx.clearRect(c.x, c.y, CELL, CELL);
+    if (c.fill) { cx.fillStyle = c.fill; cx.fillRect(c.x, c.y, DOT, DOT); }
+  }
+  function field() {
+    var dpr = devicePixelRatio || 1, w = innerWidth, h = innerHeight;
+    cv.width = w * dpr; cv.height = h * dpr;
+    cx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    var r = document.querySelector('main').getBoundingClientRect();
+    var left = r.left - GAP, right = r.right + GAP;
+    cells = [];
+    if (left < CELL * 3) return;           /* phone width: no margins to fill */
+    for (var x = 0; x < w; x += CELL) {
+      var d = x + CELL <= left ? (left - x) / left
+            : x >= right       ? (x - right + CELL) / (w - right)
+            : -1;
+      if (d < 0) continue;
+      for (var y = 0; y < h; y += CELL) {
+        var c = { x: x, y: y, d: d }; roll(c); draw(c); cells.push(c);
+      }
+    }
+  }
+  field();
+  addEventListener('resize', field);
+
+  if (reduced) return;
+
+  decrypt();
+
+  setInterval(function () {
+    for (var i = 0, n = Math.ceil(cells.length * 0.015); i < n; i++) {
+      var c = cells[Math.floor(Math.random() * cells.length)];
+      roll(c); draw(c);
+    }
+  }, 120);
+
+  var start = null, CYCLE = STEPS.length + HOLD;
+  requestAnimationFrame(function step(now) {
+    if (start === null) start = now;
+    var t = now - start;
+    run.innerHTML = render(Math.floor(t / STAGE) % CYCLE, Math.floor(t / 85));
+    requestAnimationFrame(step);
+  });
+})();
+</script>
+</body>
+</html>
