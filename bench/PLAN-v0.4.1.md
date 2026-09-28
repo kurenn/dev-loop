@@ -46,3 +46,29 @@ variant that can show it.
 The six variants ran as six concurrent `replay.sh` processes sharing one stamp, to cut
 wall clock from ~4 h to ~40 min. Within each variant the arms still alternate call by
 call, so the between-arm comparison keeps its interleave; only the variants overlap.
+
+## Result — 2026-09-28, 120 calls, 0 void
+
+| variant | truth | v0.3 blocked | v0.4 blocked |
+|---|---|---|---|
+| `authz_removed` | bad | 10/10 | 10/10 |
+| `coverage_removed` | bad | **2/10** | 10/10 |
+| `good` | good | 0/10 | **10/10** |
+| `missing_acceptance_criterion` | bad | 10/10 | 10/10 |
+| `nil_dereference` | bad | 9/10 | 10/10 |
+| `page_cap_inverted` | bad | 10/10 | 10/10 |
+
+Criteria 1 and 3 hold; **criterion 2 fails, 10/10 against 0/10.** The boundary is dropped
+and the second opinion stays.
+
+The failure is not noise — `v0.4` was unanimous on every variant. It blocked `good` for
+the same three reasons on every rep: no test fetches an archived project by id, the cap
+test checks the echoed `per_page` and not the rows returned, and auth is tested on `index`
+only. All three are true of the reference implementation. So the boundary does not
+stabilise the old gate; it defines a stricter "done", strict enough that the corpus's own
+shippable code fails it. Whether a loop *should* refuse untested acceptance criteria is a
+policy question this run can pose but not answer, and adopting that policy would need a
+new ground truth for `good`, not a calibration claim.
+
+`v0.3` on `coverage_removed` moved from 3/5 blocked to 2/10: the instability the second
+opinion was added for is still there, and is larger than the first sample showed.

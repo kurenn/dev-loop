@@ -341,18 +341,12 @@ If the diff exceeds ~2000 lines, read the files in the worktree yourself using
 Return exactly these sections:
 
 1. ACCEPTANCE — each acceptance criterion from PLAN.md marked met / partial / unmet,
-   with the evidence. A criterion that asserts behaviour is **met only when a test proves
-   it** — name that test. Code at a file:line shows the behaviour was attempted, never
-   that it holds, so a criterion no test covers is **unmet**, not met with a caveat. For a
-   criterion that asserts something other than behaviour — a file exists, a dependency is
-   gone — a file:line is the evidence. Every unmet criterion is BLOCKING.
+   with the evidence (file:line or test name). Every unmet criterion is BLOCKING.
 2. FINDINGS — every issue, each with severity:
    BLOCKING = incorrect behavior, data loss, a security hole, or an unmet acceptance
      criterion. Ships a defect.
    MAJOR = a real problem that does not block shipping: an untested branch on a risky
      path, a significant performance risk, avoidable complexity that will cost later.
-     An untested branch is MAJOR **only when no acceptance criterion covers it**; when one
-     does, that criterion is unmet and the finding is BLOCKING.
      **Disproportion is a MAJOR finding.** Code that solves a problem the task does not
      have counts against the work: speculative generality, an abstraction with one caller,
      an error handler that cannot fire, a dual-form API where one form is unused, or

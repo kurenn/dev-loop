@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.5.0
+
+A release that makes the text match the loop. It adds no mechanism, and the skill is 22
+lines shorter than 0.4.0's.
+
+**The rater was reviewing an empty diff.** Phases 6 and 7 are given `$MAIN...HEAD`, and
+nothing was committed until Phase 9, so read literally that diff was empty. Each wave is now committed once it is green, and so are
+Phase 5 repairs and Phase 8 fixes. The per-wave ownership check reads cleaner too:
+`git status` now shows only the wave in hand.
+
+**The loop's own files moved out of the worktree** into `$ART`
+(`.worktrees/<slug>.loop/`). The planner, critic and rater return text and the
+orchestrator files it. Nothing the loop writes for itself can reach a commit now, and
+none of it can turn a project's own checks red. The per-unit-worktree trial's Phase 5 went
+red on exactly that: its repo has a spec that forbids stray files at the root (#9).
+
+**The fix-round cap now covers every round.** Before, it only said what to do with a
+BLOCKING that survived the cap, so a MAJOR raised by the last delta rater had no rule, and
+both recorded runs went past the cap. Now a round is one fix, one Phase 5 and one delta
+judgment. At the cap the loop stops and hands the surviving findings to you, whatever
+their severity. The same sentence ends the delta loop, which had no end (#9).
+
+**The plan cap limits what the planner returns.** Phase 3's edits don't count against it
+(#9).
+
+**The "Measured:" rationale left the skill.** It lives here and in `bench/`. One of those
+lines called a resampled figure measured.
+
+**A rater brief was tried and rejected.** `raters/v0.4.md` stated the line between an
+unmet criterion and an untested branch, aiming at the same instability the second opinion
+targets. Pre-registered in `bench/PLAN-v0.4.1.md`, then run at n=10 per arm with the arms
+interleaved: it blocked `coverage_removed` 10/10 (v0.3: 2/10), and it also blocked the
+correct variant 10/10 (v0.3: 0/10). It was unanimous, not noisy: it held the reference
+implementation to "every acceptance criterion proven by a test", which that code does not
+meet. That is a stricter definition of done, not a calibration fix, so it was dropped and
+the second opinion stays. The same run puts v0.3's `coverage_removed` instability at 2/10
+blocked, worse than the 3/5 that motivated the second opinion.
+
 ## 0.4.0
 
 0.3.0 was written up below but never tagged or published, so the last installable release
