@@ -372,16 +372,6 @@ Critical paths in this change: <from the profile, or "none">
 
 Write the result to `$ART/RATING-round-N.md`.
 
-**Second opinion on the margin.** If the rating comes back with **no BLOCKING finding but
-at least one MAJOR**, spawn one more rater — same brief, same inputs, a fresh agent that
-has not seen the first rating — and write it to `RATING-round-N-b.md`. Merge the two: keep
-every finding either one raised, and where both describe the same issue at different
-severities, **the higher severity stands**. Gate on the merge.
-
-Only that band gets a second look. A BLOCKING finding already fails the gate, so
-confirming it buys nothing, and a rating whose worst item is MINOR is not near a decision.
-The MAJOR band is the one place a single opinion decides whether the loop ships.
-
 ## Phase 8 — Gate & fix
 
 **The gate is mechanical, not numeric.** It passes when all three hold:
@@ -408,8 +398,8 @@ The 1–10 scores never gate anything — they go in the PR body as telemetry.
   **Never satisfy a disproportion finding by weakening a test.** Dropping an assertion,
   widening a bound, or deleting a case removes coverage, not complexity. Coverage may
   only fall when the code it covered is gone. Commit the fix, **re-run Phase 5**, and
-  re-run Phase 7 as a **delta judgment**: give the new rater the round's rating — both
-  files if a second opinion was taken — plus the diff of the fix commit, and ask it to
+  re-run Phase 7 as a **delta judgment**: give the new rater the round's rating plus
+  the diff of the fix commit, and ask it to
   verify each prior finding was actually addressed and to flag anything the fix broke.
 - Re-run Phase 6 on a fix round only if the fix touched a critical path or changed the
   approach; otherwise the delta judgment is enough.

@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.5.1
+
+**The second rating on the margin is gone.** 0.4.0 added it because the rater sometimes
+labelled an untested endpoint BLOCKING and sometimes MAJOR. The 7%-to-2% figure behind it
+came from Tier 2, which scores a rating as passing whenever it has no BLOCKING finding. The
+gate is stricter than that: a MAJOR must also be fixed unless it is waived on one of three
+grounds, and an in-scope defect fits none of them. So for a real defect the two labels lead
+to the same fix round. The second rating only mattered when a mislabelled defect would
+otherwise have been waived. That case was never measured, and the waiver grounds plus the
+waiver list in every PR body already cover it. The second rating itself was not occasional:
+the correct variant drew a MAJOR on 10 of 10 reps, so it would have run on nearly every
+loop.
+
+**Rater effort was measured and left alone.** `bench/PLAN-rater-effort.md` ran the rater at
+`medium`, `high` and `xhigh`, n=10 each on every variant, with the decision rule
+pre-registered. No level made `coverage_removed` consistent (3/10, 0/10 and 3/10 blocked),
+so none is pinned. The brief's own definition files an untested branch under MAJOR, and
+the rater follows it at every level. `bench/tier2/replay.sh` gained `BENCH_EFFORT` to run
+this.
+
 ## 0.5.0
 
 A release that makes the text match the loop. It adds no mechanism, and the skill is 22
