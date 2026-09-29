@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.5.2
+
+Two changes from Anthropic's *Prompting Claude Opus 5.5* guide, applied where they fit this
+loop.
+
+**The rater is a plugin agent pinned at `high` effort.** `agents/rater.md` fixes the model
+at `claude-opus-5-5`, the effort at `high`, and the tools at read-only. Before this, the
+rater inherited the effort from each user's own Claude Code settings, so the same change
+could be judged at different depths on different machines. The guide says to set effort
+explicitly because its levels do not carry across models. `high` is the level every
+recorded rating ran at, and 0.5.1's measurement found no level that rates better. Phase 7
+now spawns `dev-loop:rater`.
+
+**A status note no longer ends the orchestrator's turn.** The guide says Opus 5.5 sometimes
+ends a turn on a progress report partway through a long task, which would stall a loop
+that is meant to run unattended after the checkpoint. Its recommended fix is to name the
+stops you do want. The skill already names them, and now it says that a status note goes
+in the same message as the next tool call.
+
+**Two corrections.** The plugin description still promised the second rating that 0.5.1
+removed. And `bench/README.md` now says that a Tier 2 "pass" means no BLOCKING finding,
+not that the change ships, which is the misreading that kept the second rating alive.
+
 ## 0.5.1
 
 **The second rating on the margin is gone.** 0.4.0 added it because the rater sometimes

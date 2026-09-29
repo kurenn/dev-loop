@@ -195,6 +195,12 @@ Gates are applied to each arm's own output, as shipped: v0.1 passes iff
 `overall >= 8.5 AND every axis >= 7`; v0.2 passes iff there are zero BLOCKING findings.
 An unparseable response is counted as no data, never as a pass.
 
+"Passes" here means **no BLOCKING finding**, not "ships". The live gate also requires every
+MAJOR to be fixed unless it is waived on one of three grounds, and a MAJOR on in-scope code
+fits none of them. So a rep scored as passing with a MAJOR on a seeded defect still forces a
+fix round in a real loop. Read the block column as the unwaivable share, and the top
+severity table as what the loop acts on.
+
 ## Reading the results honestly
 
 Three confounds that no amount of running fixes, and which any writeup must state:

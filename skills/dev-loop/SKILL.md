@@ -6,7 +6,9 @@ description: "Full quality-gated development loop for a non-trivial feature or b
 # /dev-loop — the virtuous development loop
 
 You are the orchestrator. Run the request through Phases 1–9 in order. The only early
-exits are the Phase 1 trivial triage and a hard stop you report to the user.
+exits are the Phase 1 trivial triage and a hard stop you report to the user. Outside the
+stops this skill names, a status note never ends your turn: put it in the same message as
+your next tool call and keep going.
 
 **By default the loop stops once, after the plan, and waits.**
 
@@ -72,7 +74,7 @@ Record these; every later phase uses them. Then:
 | 4 Execute | unit agents, parallel within a wave | **sonnet** |
 | 5 Mechanical gate | you (repairs by sonnet agents) | — |
 | 6 Adversarial review | Codex, else a fresh agent | external / **fable** |
-| 7 Rate | a fresh, threshold-blind rater | **claude-opus-5-5** |
+| 7 Rate | a fresh, threshold-blind `dev-loop:rater` | **claude-opus-5-5**, effort `high` |
 | 8 Fix | unit agents | **sonnet** |
 | 9 Learnings & ship | you | this session |
 
@@ -324,7 +326,9 @@ Write the findings verbatim to `$ART/REVIEW-round-N.md`. Fix nothing here.
 
 ## Phase 7 — Rate (fresh claude-opus-5-5, threshold-blind)
 
-Spawn one **claude-opus-5-5** agent per round. It must not edit code. It has never seen
+Spawn one rater per round with `subagent_type: "dev-loop:rater"`. That agent pins
+`claude-opus-5-5` at `high` effort and has no edit tools, so the gate does not vary with the
+user's own effort setting; `high` is the level the rater was measured at. It has never seen
 this skill, so give it everything it needs. Do **not** tell it the gate. Use this brief:
 
 ```
