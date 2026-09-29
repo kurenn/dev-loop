@@ -20,6 +20,10 @@ so none is pinned. The brief's own definition files an untested branch under MAJ
 the rater follows it at every level. `bench/tier2/replay.sh` gained `BENCH_EFFORT` to run
 this.
 
+**The project page was redesigned** (#13): an opensop.ai-style layout with an animated
+terminal run, in Omarchy's Tokyo Night palette. It is still one self-contained file with
+no external requests.
+
 ## 0.5.0
 
 A release that makes the text match the loop. It adds no mechanism, and the skill is 22
