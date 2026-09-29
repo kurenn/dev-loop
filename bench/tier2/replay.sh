@@ -7,6 +7,7 @@
 # Env:
 #   BENCH_REPS    repetitions per (variant, rater) pair (default 5)
 #   BENCH_MODEL   rater model for both arms (default opus)
+#   BENCH_EFFORT  rater effort level (default: the user's Claude Code setting)
 #   BENCH_STAMP   share one results dir across invocations
 set -uo pipefail
 
@@ -57,7 +58,7 @@ for VARIANT in "$CASEDIR"/variants/*/; do
         printf '%s\n' "$EXTRACT"
       } > "$DEST/prompt.txt"
 
-      ( cd "$SANDBOX" && claude --print --model "$MODEL" \
+      ( cd "$SANDBOX" && claude --print --model "$MODEL" ${BENCH_EFFORT:+--effort "$BENCH_EFFORT"} \
           --output-format json \
           --dangerously-skip-permissions \
           "$(cat "$DEST/prompt.txt")" ) > "$DEST/response.json" 2> "$DEST/stderr.txt"
