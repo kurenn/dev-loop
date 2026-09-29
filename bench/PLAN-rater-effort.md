@@ -37,3 +37,30 @@ known-bad variant passes more than 1/10, and `good` blocks no more than 1/10.
 ## What this cannot show
 
 One corpus and one brief, rated outside a live loop, and a single `good` variant.
+
+## Result — 2026-09-28, 180 calls, none void
+
+| variant | truth | medium | high | xhigh |
+|---|---|---|---|---|
+| `authz_removed` | bad | 10/10 | 10/10 | 10/10 |
+| `coverage_removed` | bad | 3/10 | **0/10** | 3/10 |
+| `good` | good | 0/10 | 0/10 | 0/10 |
+| `missing_acceptance_criterion` | bad | 10/10 | 10/10 | 10/10 |
+| `nil_dereference` | bad | 9/10 | 9/10 | 10/10 |
+| `page_cap_inverted` | bad | 10/10 | 10/10 | 10/10 |
+
+No level is stable. `high` is unanimous on `coverage_removed` only because it passes it
+every time, so it fails on the known-bad count. `medium` differs from `high` by 3/10 there,
+so it is not recorded as equivalent. Under rule 3, **nothing is pinned.**
+
+Effort does not settle `coverage_removed`. Across four v0.3 samples on Opus 5.5 (2/10,
+0/10, 3/10, 3/10) and one on the older unpinned Opus (3/5), the brief rates an endpoint
+with no test mostly as MAJOR. That is what its own definition says: MAJOR includes "an
+untested branch on a risky path". The rater is following the brief, and the corpus's
+ground truth disagrees with the brief's definition.
+
+Tier 2 scores a rep as "blocked" only when it has a BLOCKING finding. The gate is
+stricter: a MAJOR must also be fixed unless it is waived on one of three grounds, and an
+in-scope untested endpoint fits none of them. So a MAJOR on `coverage_removed` still
+forces a fix round in a live loop. The Tier 2 "block" column measures the waivable margin,
+not whether the loop ships.
