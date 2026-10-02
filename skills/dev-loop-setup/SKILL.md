@@ -73,6 +73,9 @@ the block below. If the section exists, leave it and show the user its current v
 For **critical paths**, infer from the domain: fintech → money / auth / KYC; healthcare →
 PHI / auth; infrastructure → migrations / deploy. If nothing is obvious, write `none`.
 For **specialist subagents**, list what Step 2 found, or `none`.
+Never write the gate, its thresholds, severities or waiver rules into the profile or
+`CLAUDE.md`; if the existing `CLAUDE.md` states them, list those lines in the report and
+recommend removing them.
 
 ```markdown
 ## Dev-loop config
