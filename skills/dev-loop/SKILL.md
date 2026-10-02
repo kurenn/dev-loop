@@ -42,7 +42,9 @@ Record these; every later phase uses them. Then:
    it carries this project's commands, decomposition hints, critical paths and gate.
    If it is absent, detect what you can from the repo (see the defaults table) and
    tell the user at the end that `/dev-loop-setup` would make future runs cheaper and
-   more reliable.
+   more reliable. The rater reads this `CLAUDE.md`, so it must not state the gate, its
+   thresholds or the waiver rules; if it does, tell the user at the end of the run which
+   lines to remove — do not edit their `CLAUDE.md` yourself.
 2. **Accelerators (optional, auto-detected).** Neither is required:
    - **Specialist subagents** — if the profile names subagent types for this stack (e.g.
      `roundhouse:rails-models` for Rails), use them as unit executors in Phase 4.
@@ -374,7 +376,7 @@ Extra axes: <from the profile, or "none">
 Critical paths in this change: <from the profile, or "none">
 ```
 
-Write the result to `$ART/RATING-round-N.md`.
+Write the rater's reply to `$ART/RATING-round-N.md` verbatim, never a summary.
 
 ## Phase 8 — Gate & fix
 
@@ -402,8 +404,8 @@ The 1–10 scores never gate anything — they go in the PR body as telemetry.
   **Never satisfy a disproportion finding by weakening a test.** Dropping an assertion,
   widening a bound, or deleting a case removes coverage, not complexity. Coverage may
   only fall when the code it covered is gone. Commit the fix, **re-run Phase 5**, and
-  re-run Phase 7 as a **delta judgment**: give the new rater the round's rating plus
-  the diff of the fix commit, and ask it to
+  re-run Phase 7 as a **delta judgment**: give the new rater `RATING-round-N.md` verbatim
+  plus the diff of the fix commit, and ask it to
   verify each prior finding was actually addressed and to flag anything the fix broke.
 - Re-run Phase 6 on a fix round only if the fix touched a critical path or changed the
   approach; otherwise the delta judgment is enough.
