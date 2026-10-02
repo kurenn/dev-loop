@@ -8,7 +8,10 @@ description: "Full quality-gated development loop for a non-trivial feature or b
 You are the orchestrator. Run the request through Phases 1–9 in order. The only early
 exits are the Phase 1 trivial triage and a hard stop you report to the user. Outside the
 stops this skill names, a status note never ends your turn: put it in the same message as
-your next tool call and keep going.
+your next tool call and keep going. To wait on background agents you may end the turn, but
+first arm a timed check — e.g. Bash `sleep 900` with `run_in_background` — so you wake
+within 15 minutes even if no notification arrives. On waking, check each awaited agent:
+re-arm if any is still working; one idle with no result gets Phase 4's one re-dispatch.
 
 **By default the loop stops once, after the plan, and waits.**
 
@@ -39,10 +42,12 @@ echo "ROOT=$ROOT MAIN=$MAIN GH=$GH CODEX_DIR=${CODEX_DIR:-none}"
 Record these; every later phase uses them. Then:
 
 1. **Project profile.** Read the repo's `CLAUDE.md` for a `## Dev-loop config` block —
-   it carries this project's commands, decomposition hints, critical paths and gate.
-   If it is absent, detect what you can from the repo (see the defaults table) and
-   tell the user at the end that `/dev-loop-setup` would make future runs cheaper and
-   more reliable.
+   it carries this project's commands, decomposition hints and critical paths. If it is
+   absent, detect what you can from the repo (see the defaults table) and tell the user
+   at the end that `/dev-loop-setup` would make future runs cheaper and more reliable.
+   The rater reads this `CLAUDE.md`, so it must not state the gate, its thresholds or the
+   waiver rules; if it does, tell the user at the end of the run which lines to remove —
+   do not edit their `CLAUDE.md` yourself.
 2. **Accelerators (optional, auto-detected).** Neither is required:
    - **Specialist subagents** — if the profile names subagent types for this stack (e.g.
      `roundhouse:rails-models` for Rails), use them as unit executors in Phase 4.
@@ -69,22 +74,20 @@ Record these; every later phase uses them. Then:
 | Phase | Who | Model |
 |---|---|---|
 | 1 Triage & frame | you | this session |
-| 2 Plan | one agent | **claude-opus-5-5** |
-| 3 Critique → revise | one *fresh* critic; you apply its edits | **claude-opus-5-5** |
+| 2 Plan | one `dev-loop:planner` | **claude-opus-5-5**, effort `high` (pinned) |
+| 3 Critique → revise | one *fresh* `dev-loop:critic`; you apply its edits | **claude-opus-5-5**, effort `high` (pinned) |
 | 4 Execute | unit agents, parallel within a wave | **sonnet** |
 | 5 Mechanical gate | you (repairs by sonnet agents) | — |
 | 6 Adversarial review | Codex, else a fresh agent | external / **fable** |
-| 7 Rate | a fresh, threshold-blind `dev-loop:rater` | **claude-opus-5-5**, effort `high` |
+| 7 Rate | a fresh, threshold-blind `dev-loop:rater` | **claude-opus-5-5**, effort `high` (pinned) |
 | 8 Fix | unit agents | **sonnet** |
 | 9 Learnings & ship | you | this session |
 
-Pass these as `model:` on the Agent tool. You **cannot** set your own model — if this
-session is not running a strong model, say so once and continue; the phase models still
-apply to the agents you spawn.
-
-Phases 2, 3 and 7 name a pinned model ID on purpose: the `opus` alias resolves to a
-provider's *recommended* Opus, not to Opus 5.5. Where a row names an alias, any current
-model of that family is fine.
+Phases 2, 3 and 7 use the plugin's agents, which pin `claude-opus-5-5` at `high` effort;
+every other row is passed as `model:` on the Agent tool and must be one of `sonnet`,
+`opus`, `haiku`, `fable`. You **cannot** set your own model — if this session is not
+running a strong model, say so once and continue; the phase models still apply to the
+agents you spawn.
 
 ## The agent brief contract
 
@@ -123,7 +126,7 @@ main checkout.
 1. **Trivial?** A typo, a copy edit, a one-line config change, a comment, a single
    obviously-safe file. If yes: tell the user the loop is overkill, make the edit
    directly in the main checkout, and stop.
-2. **Size tier — a hard branch, not a hint.** Count the work units the change actually
+2. **Size tier — a hard branch, not a hint.** Estimate the work units the change
    needs (a unit is one agent's worth of work over a disjoint set of files). Then commit
    to a tier and *apply its whole row*.
 
@@ -133,9 +136,8 @@ main checkout.
    | **Full** | anything larger | 300 lines | one critic call | as many as the plan needs | 2 | yes |
 
    A schema or migration change does **not** by itself force Full — a migration plus its
-   test is two units. Announce the tier and the unit count before continuing, and do not
-   silently upgrade tiers later; if the plan comes back needing more units than the tier
-   allows, say so explicitly and re-tier once.
+   test is two units. Record the tier in `LOOP_STATE.md` and do not silently upgrade it
+   later; if the plan needs more units than the tier allows, re-tier once, explicitly.
 3. **Stack check.** If the repo's language/framework can't be identified at all, say so
    and stop — every later phase depends on knowing how to build and test it.
 4. Restate the request as a crisp problem statement. Carry it into Phase 2 verbatim.
@@ -164,12 +166,12 @@ git worktree add "$WT" -b "$BR" "$MAIN" && mkdir -p "$ART"
 - If the baseline cannot be made to run at all, **stop** and report exactly which command
   failed and what is missing. Do not implement against a broken environment.
 
-**2b — Write `$ART/PLAN.md`.** Spawn one **claude-opus-5-5** agent, told to read the
-repo at `$WT` and change nothing; it returns the plan as text and you write the file.
-Give it the **tier's plan cap** as a hard limit on what it returns (Light 120 lines, Full
-300); Phase 3's edits do not count against it. `PLAN.md` is a work contract, not a design essay: it is the
-decomposition the army executes and the criteria the work is judged against. If it does
-not fit the cap, cut the prose, not the units. It must contain:
+**2b — Write `$ART/PLAN.md`.** Spawn one `subagent_type: "dev-loop:planner"`, told to
+read the repo at `$WT` and change nothing; it returns the plan as text and you write the
+file. Give it the **tier's plan cap** as a hard limit on what it returns (Light 120 lines,
+Full 300); Phase 3's edits do not count against it. `PLAN.md` is a work contract, not a
+design essay: it is the decomposition the army executes and the criteria the work is
+judged against. If it does not fit the cap, cut the prose, not the units. It must contain:
 
 - **Problem & acceptance criteria** — a checklist, each item independently verifiable.
 - **Scope** — explicitly in and explicitly out.
@@ -200,7 +202,7 @@ not fit the cap, cut the prose, not the units. It must contain:
 
 ## Phase 3 — Critique the plan, then revise it
 
-1. Spawn **one fresh claude-opus-5-5** agent — a different agent, not the planner. Give
+1. Spawn **one fresh** `subagent_type: "dev-loop:critic"` — not the planner. Give
    it only the original request and `PLAN.md`; it must not see the planner's reasoning.
    Brief it to attack: wrong problem framing, missing acceptance criteria, ownership
    collisions between units in the same wave, wave-ordering errors, unstated assumptions,
@@ -224,7 +226,7 @@ not fit the cap, cut the prose, not the units. It must contain:
    - the wave breakdown — unit name and owned paths, one line each
    - every assumption from `PLAN.md`, and the risk tier
    - what the critique changed, and anything you rebutted, with the reason
-   - the cost shape — how many units, how many waves, whether Codex will run
+   - the cost shape — the tier, how many units, how many waves, whether Codex will run
 
    Then ask for **approve**, **revise** (with feedback), or **abort**. On revise, re-spawn
    the planner with the feedback, re-present, and repeat at most twice before asking for a
@@ -287,7 +289,7 @@ install/build · tests · lint · typecheck · security scan — whichever the p
 - If red: dispatch **sonnet** agents to repair, commit the repair, then re-run. This is
   repair, not a fix round — it does not consume the fix-round cap, but cap it at 3 attempts
   and stop if the same failure survives all three.
-- Nothing proceeds to Phase 6 on red.
+- Start Phase 6 only after every check has finished green — never while one is running.
 
 ## Phase 6 — Adversarial review
 
@@ -326,10 +328,12 @@ Write the findings verbatim to `$ART/REVIEW-round-N.md`. Fix nothing here.
 
 ## Phase 7 — Rate (fresh claude-opus-5-5, threshold-blind)
 
-Spawn one rater per round with `subagent_type: "dev-loop:rater"`. That agent pins
-`claude-opus-5-5` at `high` effort and has no edit tools, so the gate does not vary with the
-user's own effort setting; `high` is the level the rater was measured at. It has never seen
-this skill, so give it everything it needs. Do **not** tell it the gate. Use this brief:
+Start only after Phase 6's findings are in `$ART/REVIEW-round-N.md`, or Phase 6 was
+skipped by tier. Spawn one rater per round with `subagent_type: "dev-loop:rater"`. That
+agent pins `claude-opus-5-5` at `high` effort and has no Edit or Write tool, so the gate
+does not vary with the user's own effort setting; `high` is the level the rater was
+measured at. It has never seen this skill, so give it everything it needs. Do **not** tell
+it the gate. Use this brief:
 
 ```
 You are an independent reviewer. You did not write this code. Judge it; do not change it.
@@ -374,7 +378,7 @@ Extra axes: <from the profile, or "none">
 Critical paths in this change: <from the profile, or "none">
 ```
 
-Write the result to `$ART/RATING-round-N.md`.
+Write the rater's reply to `$ART/RATING-round-N.md` verbatim, never a summary.
 
 ## Phase 8 — Gate & fix
 
@@ -395,26 +399,35 @@ that run is shipping under.
 
 The 1–10 scores never gate anything — they go in the PR body as telemetry.
 
-- **Gate met** → Phase 9.
+- **Gate met** → Phase 9. MINOR findings are listed in the PR, not fixed, unless the user
+  asks.
 - **Not met** → dispatch **sonnet** agents (brief contract preamble, ownership from the
   plan) to fix the BLOCKING findings first, then the MAJORs. A fix must be the smallest
   change that resolves the finding; removing implementation code is a legitimate fix.
   **Never satisfy a disproportion finding by weakening a test.** Dropping an assertion,
   widening a bound, or deleting a case removes coverage, not complexity. Coverage may
   only fall when the code it covered is gone. Commit the fix, **re-run Phase 5**, and
-  re-run Phase 7 as a **delta judgment**: give the new rater the round's rating plus
-  the diff of the fix commit, and ask it to
-  verify each prior finding was actually addressed and to flag anything the fix broke.
+  re-run Phase 7 as a **delta judgment**: give the new rater `RATING-round-N.md` verbatim
+  plus the diff of the fix commit, and ask it to verify each prior finding was actually
+  addressed and to flag anything the fix broke.
 - Re-run Phase 6 on a fix round only if the fix touched a critical path or changed the
   approach; otherwise the delta judgment is enough.
-- **A fix round is one fix, one Phase 5, one delta judgment — and the tier caps the
-  rounds** (Light 1, Full 2). If the gate is not met after the last round — a BLOCKING
-  survives, or a MAJOR is neither fixed nor waivable, including one the delta judgment
-  itself raised — stop: write what is unresolved into `LOOP_STATE.md`, still run Phase 9's
-  learnings capture, and report the surviving findings to the user. Another round, a
-  waiver outside the three grounds, or abandoning the change is their call, not yours.
-  Never loosen the gate to pass, and never reclassify a BLOCKING finding as MAJOR to get
-  through it.
+- **A fix round runs in strict sequence — fix, Phase 5, Phase 6 if required, then the
+  delta judgment given any new review file — and the tier caps the rounds** (Light 1,
+  Full 2). If the gate is not met after the last round — a BLOCKING survives, or a MAJOR
+  is neither fixed nor waivable, including one the delta judgment itself raised — stop:
+  write what is unresolved into `LOOP_STATE.md`, still run Phase 9's learnings capture,
+  and report the surviving findings to the user. Another round, a waiver outside the
+  three grounds, or abandoning the change is their call, not yours. Never loosen the gate
+  to pass, and never reclassify a BLOCKING finding as MAJOR to get through it.
+- **No commit reaches `$BR` unrated.** Every commit after the last rating — a tidy, a merge
+  of `$MAIN` and its conflict resolution, a CI fix, a fix the user asks for after the PR is
+  open — is made by a **sonnet** unit agent, never by you, and gets a delta judgment before
+  it is pushed; a judgment that raises a new MAJOR or BLOCKING is a fix round and counts
+  against the cap. Merge a moved `$MAIN` as its own commit, re-run Phase 5 against the new
+  base, and include the merge in the next delta judgment. Before every push, list the
+  commits on `$BR` since the last rating — yours or anyone's — and rate any that no delta
+  judgment has seen.
 
 ## Phase 9 — Learnings & ship
 
@@ -441,10 +454,10 @@ The 1–10 scores never gate anything — they go in the PR body as telemetry.
    - **Independent rating** — the axis scores as telemetry, plus the finding counts by
      severity and every MAJOR waiver with its reason and which of the three grounds it
      claimed
-   - **Loop trace** — the `Trace` line from `LOOP_STATE.md`: fix rounds run, headline
-     adversarial challenge(s), unit re-dispatches and ownership violations, and any
-     degraded phases (in-family review, skipped mechanical checks, no specialist agents)
-   - **Improvement applied** — what the fix rounds changed; follow-ups deferred
+   - **Loop trace** — the `Trace` line from `LOOP_STATE.md`: fix rounds run and what they
+     changed, headline adversarial challenge(s), unit re-dispatches and ownership
+     violations, degraded phases (in-family review, skipped mechanical checks, no
+     specialist agents), and follow-ups deferred
    - **Test plan** — how to verify, including manual steps for UI changes
    - **Assumptions** — the ones from `PLAN.md`, marked as approved at the Phase 3
      checkpoint or shipped unreviewed under autonomous mode

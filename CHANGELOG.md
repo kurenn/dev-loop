@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.6.0
+
+These fixes come from an audit of 19 real loops across 7 sessions on 0.5.1 and 0.5.2. The
+loop's core held: every loop stopped for plan approval, overran its fix-round cap only
+with the user's consent, ran Codex where the rules require it, and never pushed outside
+its repo. The guarantee leaked at the edges, where code reached a PR without being rated.
+
+**No commit reaches the loop branch unrated.** The audit found unrated commits in every
+session: the orchestrator's own tidies after the gate, merges of a moved `$MAIN` with
+their conflict resolutions, CI fixes after the PR opened, MINOR fixes after the gate was
+already met, and commits pushed to a loop's PR from outside any loop. Every commit after
+the last rating is now made by a unit agent and gets a delta judgment before it is pushed.
+Before every push, the loop lists the commits made since the last rating and rates any
+that were missed. A met gate goes straight to Phase 9, and its MINORs are listed rather
+than fixed.
+
+**Phases 5, 6 and 7 run in strict order**, inside fix rounds too. Loops had started Codex
+alongside the test suite and the rater alongside Codex. In one loop the rater rated
+without the adversarial findings it was supposed to judge.
+
+**The rater sees verbatim records and no threshold.** Ratings had been saved as the
+orchestrator's summaries, and the next delta rater was told the summary was
+authoritative. Ratings are now saved verbatim. Subagents also load the project's
+`CLAUDE.md`, and one project stated the gate there, so every rater knew the threshold.
+The loop and `/dev-loop-setup` now flag those lines for removal.
+
+**A wait cannot stall silently.** One loop sat idle for 11 hours on a notification that
+never arrived; others sat for 20 to 26 minutes. Before ending a turn to wait on
+background agents, the orchestrator now arms a 15-minute background timer. When it wakes,
+it checks every agent it is waiting on and re-dispatches an idle one once. The timer
+reports through the same notification channel as the agents. If a stall recurs, a
+scheduled task (CronCreate) is the next step.
+
+**The planner and critic are plugin agents**, like the rater: `dev-loop:planner` and
+`dev-loop:critic`, pinned to `claude-opus-5-5` at `high` effort. The Agent tool only
+accepts `sonnet`, `opus`, `haiku` or `fable` as a model, so the skill's
+`model: "claude-opus-5-5"` failed on every run. The planner and critic got Opus 5.5 anyway
+only because the `opus` alias currently resolves to it.
+
+**Two rules nobody followed are gone.** Loops were told to announce the tier before
+planning, before the unit count can be known; the tier is now shown at the plan
+checkpoint. The PR's "Improvement applied" section was missing from nearly every PR; its
+content now sits in the loop trace.
+
 ## 0.5.2
 
 Two changes from Anthropic's *Prompting Claude Opus 5.5* guide, applied where they fit this
