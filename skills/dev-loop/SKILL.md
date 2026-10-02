@@ -39,12 +39,12 @@ echo "ROOT=$ROOT MAIN=$MAIN GH=$GH CODEX_DIR=${CODEX_DIR:-none}"
 Record these; every later phase uses them. Then:
 
 1. **Project profile.** Read the repo's `CLAUDE.md` for a `## Dev-loop config` block —
-   it carries this project's commands, decomposition hints, critical paths and gate.
-   If it is absent, detect what you can from the repo (see the defaults table) and
-   tell the user at the end that `/dev-loop-setup` would make future runs cheaper and
-   more reliable. The rater reads this `CLAUDE.md`, so it must not state the gate, its
-   thresholds or the waiver rules; if it does, tell the user at the end of the run which
-   lines to remove — do not edit their `CLAUDE.md` yourself.
+   it carries this project's commands, decomposition hints and critical paths. If it is
+   absent, detect what you can from the repo (see the defaults table) and tell the user
+   at the end that `/dev-loop-setup` would make future runs cheaper and more reliable.
+   The rater reads this `CLAUDE.md`, so it must not state the gate, its thresholds or the
+   waiver rules; if it does, tell the user at the end of the run which lines to remove —
+   do not edit their `CLAUDE.md` yourself.
 2. **Accelerators (optional, auto-detected).** Neither is required:
    - **Specialist subagents** — if the profile names subagent types for this stack (e.g.
      `roundhouse:rails-models` for Rails), use them as unit executors in Phase 4.
@@ -82,9 +82,9 @@ Record these; every later phase uses them. Then:
 
 Phases 2, 3 and 7 use the plugin's agents, which pin `claude-opus-5-5` at `high` effort;
 every other row is passed as `model:` on the Agent tool and must be one of `sonnet`,
-`opus`, `haiku`, `fable`. You **cannot** set your own model — if this
-session is not running a strong model, say so once and continue; the phase models still
-apply to the agents you spawn.
+`opus`, `haiku`, `fable`. You **cannot** set your own model — if this session is not
+running a strong model, say so once and continue; the phase models still apply to the
+agents you spawn.
 
 ## The agent brief contract
 
@@ -163,12 +163,12 @@ git worktree add "$WT" -b "$BR" "$MAIN" && mkdir -p "$ART"
 - If the baseline cannot be made to run at all, **stop** and report exactly which command
   failed and what is missing. Do not implement against a broken environment.
 
-**2b — Write `$ART/PLAN.md`.** Spawn one `subagent_type: "dev-loop:planner"`, told to read the
-repo at `$WT` and change nothing; it returns the plan as text and you write the file.
-Give it the **tier's plan cap** as a hard limit on what it returns (Light 120 lines, Full
-300); Phase 3's edits do not count against it. `PLAN.md` is a work contract, not a design essay: it is the
-decomposition the army executes and the criteria the work is judged against. If it does
-not fit the cap, cut the prose, not the units. It must contain:
+**2b — Write `$ART/PLAN.md`.** Spawn one `subagent_type: "dev-loop:planner"`, told to
+read the repo at `$WT` and change nothing; it returns the plan as text and you write the
+file. Give it the **tier's plan cap** as a hard limit on what it returns (Light 120 lines,
+Full 300); Phase 3's edits do not count against it. `PLAN.md` is a work contract, not a
+design essay: it is the decomposition the army executes and the criteria the work is
+judged against. If it does not fit the cap, cut the prose, not the units. It must contain:
 
 - **Problem & acceptance criteria** — a checklist, each item independently verifiable.
 - **Scope** — explicitly in and explicitly out.
@@ -326,11 +326,11 @@ Write the findings verbatim to `$ART/REVIEW-round-N.md`. Fix nothing here.
 ## Phase 7 — Rate (fresh claude-opus-5-5, threshold-blind)
 
 Start only after Phase 6's findings are in `$ART/REVIEW-round-N.md`, or Phase 6 was
-skipped by tier. Spawn one rater per round with `subagent_type: "dev-loop:rater"`.
-That agent pins
-`claude-opus-5-5` at `high` effort and has no edit tools, so the gate does not vary with the
-user's own effort setting; `high` is the level the rater was measured at. It has never seen
-this skill, so give it everything it needs. Do **not** tell it the gate. Use this brief:
+skipped by tier. Spawn one rater per round with `subagent_type: "dev-loop:rater"`. That
+agent pins `claude-opus-5-5` at `high` effort and has no Edit or Write tool, so the gate
+does not vary with the user's own effort setting; `high` is the level the rater was
+measured at. It has never seen this skill, so give it everything it needs. Do **not** tell
+it the gate. Use this brief:
 
 ```
 You are an independent reviewer. You did not write this code. Judge it; do not change it.
@@ -405,25 +405,26 @@ The 1–10 scores never gate anything — they go in the PR body as telemetry.
   widening a bound, or deleting a case removes coverage, not complexity. Coverage may
   only fall when the code it covered is gone. Commit the fix, **re-run Phase 5**, and
   re-run Phase 7 as a **delta judgment**: give the new rater `RATING-round-N.md` verbatim
-  plus the diff of the fix commit, and ask it to
-  verify each prior finding was actually addressed and to flag anything the fix broke.
+  plus the diff of the fix commit, and ask it to verify each prior finding was actually
+  addressed and to flag anything the fix broke.
 - Re-run Phase 6 on a fix round only if the fix touched a critical path or changed the
   approach; otherwise the delta judgment is enough.
 - **A fix round runs in strict sequence — fix, Phase 5, Phase 6 if required, then the
   delta judgment given any new review file — and the tier caps the rounds** (Light 1,
-  Full 2). If the gate is not met after the last round — a BLOCKING
-  survives, or a MAJOR is neither fixed nor waivable, including one the delta judgment
-  itself raised — stop: write what is unresolved into `LOOP_STATE.md`, still run Phase 9's
-  learnings capture, and report the surviving findings to the user. Another round, a
-  waiver outside the three grounds, or abandoning the change is their call, not yours.
-  Never loosen the gate to pass, and never reclassify a BLOCKING finding as MAJOR to get
-  through it.
+  Full 2). If the gate is not met after the last round — a BLOCKING survives, or a MAJOR
+  is neither fixed nor waivable, including one the delta judgment itself raised — stop:
+  write what is unresolved into `LOOP_STATE.md`, still run Phase 9's learnings capture,
+  and report the surviving findings to the user. Another round, a waiver outside the
+  three grounds, or abandoning the change is their call, not yours. Never loosen the gate
+  to pass, and never reclassify a BLOCKING finding as MAJOR to get through it.
 - **No commit reaches `$BR` unrated.** Every commit after the last rating — a tidy, a merge
   of `$MAIN` and its conflict resolution, a CI fix, a fix the user asks for after the PR is
   open — is made by a **sonnet** unit agent, never by you, and gets a delta judgment before
   it is pushed; a judgment that raises a new MAJOR or BLOCKING is a fix round and counts
   against the cap. Merge a moved `$MAIN` as its own commit, re-run Phase 5 against the new
-  base, and include the merge in the next delta judgment.
+  base, and include the merge in the next delta judgment. Before every push, list the
+  commits on `$BR` since the last rating — yours or anyone's — and rate any that no delta
+  judgment has seen.
 
 ## Phase 9 — Learnings & ship
 
