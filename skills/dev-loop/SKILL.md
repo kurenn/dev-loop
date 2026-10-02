@@ -123,7 +123,7 @@ main checkout.
 1. **Trivial?** A typo, a copy edit, a one-line config change, a comment, a single
    obviously-safe file. If yes: tell the user the loop is overkill, make the edit
    directly in the main checkout, and stop.
-2. **Size tier — a hard branch, not a hint.** Count the work units the change actually
+2. **Size tier — a hard branch, not a hint.** Estimate the work units the change
    needs (a unit is one agent's worth of work over a disjoint set of files). Then commit
    to a tier and *apply its whole row*.
 
@@ -133,9 +133,8 @@ main checkout.
    | **Full** | anything larger | 300 lines | one critic call | as many as the plan needs | 2 | yes |
 
    A schema or migration change does **not** by itself force Full — a migration plus its
-   test is two units. Announce the tier and the unit count before continuing, and do not
-   silently upgrade tiers later; if the plan comes back needing more units than the tier
-   allows, say so explicitly and re-tier once.
+   test is two units. Record the tier in `LOOP_STATE.md` and do not silently upgrade it
+   later; if the plan needs more units than the tier allows, re-tier once, explicitly.
 3. **Stack check.** If the repo's language/framework can't be identified at all, say so
    and stop — every later phase depends on knowing how to build and test it.
 4. Restate the request as a crisp problem statement. Carry it into Phase 2 verbatim.
@@ -224,7 +223,7 @@ not fit the cap, cut the prose, not the units. It must contain:
    - the wave breakdown — unit name and owned paths, one line each
    - every assumption from `PLAN.md`, and the risk tier
    - what the critique changed, and anything you rebutted, with the reason
-   - the cost shape — how many units, how many waves, whether Codex will run
+   - the cost shape — the tier, how many units, how many waves, whether Codex will run
 
    Then ask for **approve**, **revise** (with feedback), or **abort**. On revise, re-spawn
    the planner with the feedback, re-present, and repeat at most twice before asking for a
@@ -441,10 +440,10 @@ The 1–10 scores never gate anything — they go in the PR body as telemetry.
    - **Independent rating** — the axis scores as telemetry, plus the finding counts by
      severity and every MAJOR waiver with its reason and which of the three grounds it
      claimed
-   - **Loop trace** — the `Trace` line from `LOOP_STATE.md`: fix rounds run, headline
-     adversarial challenge(s), unit re-dispatches and ownership violations, and any
-     degraded phases (in-family review, skipped mechanical checks, no specialist agents)
-   - **Improvement applied** — what the fix rounds changed; follow-ups deferred
+   - **Loop trace** — the `Trace` line from `LOOP_STATE.md`: fix rounds run and what they
+     changed, headline adversarial challenge(s), unit re-dispatches and ownership
+     violations, degraded phases (in-family review, skipped mechanical checks, no
+     specialist agents), and follow-ups deferred
    - **Test plan** — how to verify, including manual steps for UI changes
    - **Assumptions** — the ones from `PLAN.md`, marked as approved at the Phase 3
      checkpoint or shipped unreviewed under autonomous mode
