@@ -286,7 +286,7 @@ install/build · tests · lint · typecheck · security scan — whichever the p
 - If red: dispatch **sonnet** agents to repair, commit the repair, then re-run. This is
   repair, not a fix round — it does not consume the fix-round cap, but cap it at 3 attempts
   and stop if the same failure survives all three.
-- Nothing proceeds to Phase 6 on red.
+- Start Phase 6 only after every check has finished green — never while one is running.
 
 ## Phase 6 — Adversarial review
 
@@ -325,7 +325,9 @@ Write the findings verbatim to `$ART/REVIEW-round-N.md`. Fix nothing here.
 
 ## Phase 7 — Rate (fresh claude-opus-5-5, threshold-blind)
 
-Spawn one rater per round with `subagent_type: "dev-loop:rater"`. That agent pins
+Start only after Phase 6's findings are in `$ART/REVIEW-round-N.md`, or Phase 6 was
+skipped by tier. Spawn one rater per round with `subagent_type: "dev-loop:rater"`.
+That agent pins
 `claude-opus-5-5` at `high` effort and has no edit tools, so the gate does not vary with the
 user's own effort setting; `high` is the level the rater was measured at. It has never seen
 this skill, so give it everything it needs. Do **not** tell it the gate. Use this brief:
@@ -406,8 +408,9 @@ The 1–10 scores never gate anything — they go in the PR body as telemetry.
   verify each prior finding was actually addressed and to flag anything the fix broke.
 - Re-run Phase 6 on a fix round only if the fix touched a critical path or changed the
   approach; otherwise the delta judgment is enough.
-- **A fix round is one fix, one Phase 5, one delta judgment — and the tier caps the
-  rounds** (Light 1, Full 2). If the gate is not met after the last round — a BLOCKING
+- **A fix round runs in strict sequence — fix, Phase 5, Phase 6 if required, then the
+  delta judgment given any new review file — and the tier caps the rounds** (Light 1,
+  Full 2). If the gate is not met after the last round — a BLOCKING
   survives, or a MAJOR is neither fixed nor waivable, including one the delta judgment
   itself raised — stop: write what is unresolved into `LOOP_STATE.md`, still run Phase 9's
   learnings capture, and report the surviving findings to the user. Another round, a
