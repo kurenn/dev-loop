@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.6.1
+
+Fixes found by monitoring and auditing the first 0.6.0 loops on 2026-10-02: 8 loops across
+4 sessions, two of them running 5 loops each as parallel "lanes". No 0.6.0 loop shipped
+an unrated commit. These are the gaps the audits found anyway.
+
+**Everything is based on a fresh `origin/$MAIN`.** The skill branched worktrees from the
+local `$MAIN` and diffed against it. In one loop that branch was days behind, so the rater
+was given 138 files to judge instead of the change. Step 0 now fetches and sets `$BASE`,
+and every worktree, diff, Codex base and merge uses it. `$MAIN` remains only as the
+branch name for `gh pr create`.
+
+**Timers are cancelled by their own task id.** One lane cancelled its timer with
+`pkill -f "sleep 900"`. That killed the parent's timer and another lane's, because every
+timer runs the same command, and it is exactly the silent stall the timer exists to
+prevent. Timers are also cancelled before a stop that waits on the user. Leftover timers
+had woken a lane parked at its checkpoint, and it re-sent its question each time.
+
+**Two contradictions in 0.6.0's own text are resolved.** Phase 8 said "commit the fix"
+while the new rule said nothing after a rating is committed by the orchestrator; the fix
+agent now commits. Phase 9's learnings commit is named as the one exception: the
+orchestrator's, unrated, and touching only the learnings file.
+
+**A red suite is not a flake by assertion.** A lane went from 0 baseline failures to 2,
+called them flakes because they passed in isolation and an open flake issue existed, and
+moved on to rating. A new failure now counts as a flake only if the full suite passes on
+one rerun.
+
+**A lane's checkpoint reaches the user whole.** When a parent session relayed a lane's
+plan for approval, it dropped the acceptance criteria and the assumptions, so the user
+approved assumptions they never saw. A loop running as a subagent now returns the full
+checkpoint summary, and the parent relays it unabridged.
+
 ## 0.6.0
 
 These fixes come from an audit of 19 real loops across 7 sessions on 0.5.1 and 0.5.2. The

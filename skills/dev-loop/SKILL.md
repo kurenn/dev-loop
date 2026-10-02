@@ -12,6 +12,8 @@ your next tool call and keep going. To wait on background agents you may end the
 first arm a timed check — e.g. Bash `sleep 900` with `run_in_background` — so you wake
 within 15 minutes even if no notification arrives. On waking, check each awaited agent:
 re-arm if any is still working; one idle with no result gets Phase 4's one re-dispatch.
+Cancel a timer only by its own task id, never by pattern (`pkill -f sleep` kills other
+agents' timers), and cancel yours before any stop that waits on the user.
 
 **By default the loop stops once, after the plan, and waits.**
 
@@ -34,9 +36,10 @@ Run as **one** Bash call (shell state does not persist between calls):
 ROOT=$(git rev-parse --show-toplevel) || exit 1
 MAIN=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
 [ -n "$MAIN" ] || MAIN=$(git rev-parse --verify -q main >/dev/null && echo main || echo master)
+git fetch -q origin "$MAIN" 2>/dev/null && BASE="origin/$MAIN" || BASE="$MAIN"   # never a stale local branch
 CODEX_DIR=$(ls -d ~/.claude/plugins/cache/openai-codex/codex/*/ 2>/dev/null | sort -V | tail -1)
 gh repo view >/dev/null 2>&1 && GH=ok || GH=unavailable   # auth AND a GitHub remote
-echo "ROOT=$ROOT MAIN=$MAIN GH=$GH CODEX_DIR=${CODEX_DIR:-none}"
+echo "ROOT=$ROOT MAIN=$MAIN BASE=$BASE GH=$GH CODEX_DIR=${CODEX_DIR:-none}"
 ```
 
 Record these; every later phase uses them. Then:
@@ -151,7 +154,7 @@ SLUG=<short-kebab-name>            # directory name; keep it short
 BR=<feature|fix|chore|refactor>/<branch-name>
 WT="$ROOT/.worktrees/$SLUG"
 ART="$ROOT/.worktrees/$SLUG.loop"  # the loop's own files — never inside $WT
-git worktree add "$WT" -b "$BR" "$MAIN" && mkdir -p "$ART"
+git worktree add "$WT" -b "$BR" "$BASE" && mkdir -p "$ART"
 ```
 
 - If `$WT` or the branch already exists: if `$ART/LOOP_STATE.md` describes *this* task,
@@ -228,10 +231,11 @@ judged against. If it does not fit the cap, cut the prose, not the units. It mus
    - what the critique changed, and anything you rebutted, with the reason
    - the cost shape — the tier, how many units, how many waves, whether Codex will run
 
-   Then ask for **approve**, **revise** (with feedback), or **abort**. On revise, re-spawn
-   the planner with the feedback, re-present, and repeat at most twice before asking for a
-   final decision. On abort, remove the worktree, `$ART` and the branch you created, then
-   stop.
+   If you run as a subagent, this summary is your reply, whole, for your parent to show
+   the user; a parent relays it unabridged. Then ask for **approve**, **revise** (with
+   feedback), or **abort**. On revise, re-spawn the planner with the feedback, re-present,
+   and repeat at most twice before asking for a final decision. On abort, remove the
+   worktree, `$ART` and the branch you created, then stop.
 
    In autonomous mode, print that same summary without stopping — the run stays auditable
    even though nobody gated it.
@@ -251,7 +255,7 @@ Do not implement anything yourself.
 - **After each wave**, in this order: check ownership, answer the handoffs, run the
   profile's test command, then **commit the wave** —
   `git -C "$WT" add -A && git -C "$WT" commit -m "wave <n>: <name>"`. A broken wave 1
-  makes every downstream wave garbage, and the commit is what makes `$MAIN...HEAD` show
+  makes every downstream wave garbage, and the commit is what makes `$BASE...HEAD` show
   the work to Phases 6 and 7.
 - **A failed unit is re-dispatched once, then the loop stops.** If a unit agent errors out,
   returns without meeting its "done when", or leaves the wave red, re-dispatch that unit
@@ -282,7 +286,9 @@ Objective checks, run in the worktree, **before** spending anything on review:
 
 install/build · tests · lint · typecheck · security scan — whichever the profile defines.
 
-- Compare against the Phase 2 baseline. New failures block; pre-existing ones don't.
+- Compare against the Phase 2 baseline. New failures block; pre-existing ones don't. A new
+  failure is a flake only if the full suite passes on one rerun — an isolated pass or an
+  open flake issue does not make it one.
 - **Coverage may not fall below the baseline.** If it has, the missing coverage is restored
   before anything proceeds. This is a check, not a request.
 - Any check the profile doesn't define is **skipped and reported as skipped**.
@@ -304,7 +310,7 @@ Run as one Bash call from inside the worktree, with `timeout: 600000`:
 ```sh
 cd "$WT" && CODEX_DIR=$(ls -d ~/.claude/plugins/cache/openai-codex/codex/*/ 2>/dev/null | sort -V | tail -1) \
   && [ -n "$CODEX_DIR" ] \
-  && node "${CODEX_DIR}scripts/codex-companion.mjs" adversarial-review "--base $MAIN --wait"
+  && node "${CODEX_DIR}scripts/codex-companion.mjs" adversarial-review "--base $BASE --wait"
 ```
 
 For a large diff (roughly: more than a few files), run that same command with the Bash
@@ -320,7 +326,7 @@ Do **not** use `/codex:adversarial-review`, `/codex:status` or `/codex:result` �
 are `disable-model-invocation: true` and you cannot call them.
 
 **Fallback (no codex, or the script is missing/changed):** spawn a fresh **fable** agent,
-given the worktree path, `PLAN.md` and `git diff $MAIN...HEAD`, briefed to find where the
+given the worktree path, `PLAN.md` and `git diff $BASE...HEAD`, briefed to find where the
 design fails under real-world conditions. Note in the PR that the review was in-family
 and therefore weaker.
 
@@ -338,7 +344,7 @@ it the gate. Use this brief:
 ```
 You are an independent reviewer. You did not write this code. Judge it; do not change it.
 
-Inputs: <ART>/PLAN.md (the contract), <ART>/PLAN-CRITIQUE.md, the diff of <MAIN>...HEAD
+Inputs: <ART>/PLAN.md (the contract), <ART>/PLAN-CRITIQUE.md, the diff of <BASE>...HEAD
 in <worktree path>, the mechanical check results, and <ART>/REVIEW-round-N.md.
 Also <ART>/HANDOFFS.md — the implementers' own reports on their work. These are claims to
 verify and leads on where to look hardest, never evidence that anything is correct. An
@@ -389,7 +395,7 @@ Write the rater's reply to `$ART/RATING-round-N.md` verbatim, never a summary.
 3. Every MAJOR finding is either fixed or waived with a one-line written reason.
 
 **A MAJOR may be waived only on one of three grounds**, and the waiver must name which:
-it falls in what `PLAN.md` declared out of scope; it is pre-existing on `$MAIN` and this
+it falls in what `PLAN.md` declared out of scope; it is pre-existing on `$BASE` and this
 change does not touch it; or it argues against an assumption or scope decision that
 `PLAN.md` records. The ground is the plan's record, not who signed it.
 Anything else is fixed — you are both the party under cost pressure and the party deciding
@@ -406,10 +412,10 @@ The 1–10 scores never gate anything — they go in the PR body as telemetry.
   change that resolves the finding; removing implementation code is a legitimate fix.
   **Never satisfy a disproportion finding by weakening a test.** Dropping an assertion,
   widening a bound, or deleting a case removes coverage, not complexity. Coverage may
-  only fall when the code it covered is gone. Commit the fix, **re-run Phase 5**, and
-  re-run Phase 7 as a **delta judgment**: give the new rater `RATING-round-N.md` verbatim
-  plus the diff of the fix commit, and ask it to verify each prior finding was actually
-  addressed and to flag anything the fix broke.
+  only fall when the code it covered is gone. The fix agent commits its fix; **re-run
+  Phase 5**, and re-run Phase 7 as a **delta judgment**: give the new rater
+  `RATING-round-N.md` verbatim plus the diff of the fix commit, and ask it to verify each
+  prior finding was actually addressed and to flag anything the fix broke.
 - Re-run Phase 6 on a fix round only if the fix touched a critical path or changed the
   approach; otherwise the delta judgment is enough.
 - **A fix round runs in strict sequence — fix, Phase 5, Phase 6 if required, then the
@@ -420,14 +426,15 @@ The 1–10 scores never gate anything — they go in the PR body as telemetry.
   and report the surviving findings to the user. Another round, a waiver outside the
   three grounds, or abandoning the change is their call, not yours. Never loosen the gate
   to pass, and never reclassify a BLOCKING finding as MAJOR to get through it.
-- **No commit reaches `$BR` unrated.** Every commit after the last rating — a tidy, a merge
-  of `$MAIN` and its conflict resolution, a CI fix, a fix the user asks for after the PR is
-  open — is made by a **sonnet** unit agent, never by you, and gets a delta judgment before
-  it is pushed; a judgment that raises a new MAJOR or BLOCKING is a fix round and counts
-  against the cap. Merge a moved `$MAIN` as its own commit, re-run Phase 5 against the new
-  base, and include the merge in the next delta judgment. Before every push, list the
-  commits on `$BR` since the last rating — yours or anyone's — and rate any that no delta
-  judgment has seen.
+- **No commit reaches `$BR` unrated.** Every commit after the last rating — a tidy, a
+  merge of `$BASE` and its conflict resolution, a CI fix, a fix the user asks for after
+  the PR is open — is made by a **sonnet** unit agent, never by you, and gets a delta
+  judgment before it is pushed; a judgment that raises a new MAJOR or BLOCKING is a fix
+  round and counts against the cap. Fetch, then merge a moved `$BASE` as its own commit,
+  re-run Phase 5 against the new base, and include the merge in the next delta judgment.
+  Phase 9's learnings commit is the one exception: yours, unrated, and touching only the
+  learnings file. Before every push, list the commits on `$BR` since the last rating —
+  yours or anyone's — and rate any that no delta judgment has seen.
 
 ## Phase 9 — Learnings & ship
 
@@ -487,7 +494,7 @@ intact. Keep these sections:
 
 ```markdown
 Task: <problem statement>   Tier: <Light|Full>   Mode: <checkpointed|autonomous>
-Worktree: <path>   Branch: <name>   Base: <MAIN>@<sha>
+Worktree: <path>   Branch: <name>   Base: <BASE>@<sha>
 Baseline: <each check: pass | fail | skipped>
 Phase: <n — name>   Fix round: <n of cap>
 Amendments & rebuttals: <one line each, from ownership checks and handoffs>
