@@ -395,7 +395,8 @@ that run is shipping under.
 
 The 1–10 scores never gate anything — they go in the PR body as telemetry.
 
-- **Gate met** → Phase 9.
+- **Gate met** → Phase 9. MINOR findings are listed in the PR, not fixed, unless the user
+  asks.
 - **Not met** → dispatch **sonnet** agents (brief contract preamble, ownership from the
   plan) to fix the BLOCKING findings first, then the MAJORs. A fix must be the smallest
   change that resolves the finding; removing implementation code is a legitimate fix.
@@ -415,6 +416,12 @@ The 1–10 scores never gate anything — they go in the PR body as telemetry.
   waiver outside the three grounds, or abandoning the change is their call, not yours.
   Never loosen the gate to pass, and never reclassify a BLOCKING finding as MAJOR to get
   through it.
+- **No commit reaches `$BR` unrated.** Every commit after the last rating — a tidy, a merge
+  of `$MAIN` and its conflict resolution, a CI fix, a fix the user asks for after the PR is
+  open — is made by a **sonnet** unit agent, never by you, and gets a delta judgment before
+  it is pushed; a judgment that raises a new MAJOR or BLOCKING is a fix round and counts
+  against the cap. Merge a moved `$MAIN` as its own commit, re-run Phase 5 against the new
+  base, and include the merge in the next delta judgment.
 
 ## Phase 9 — Learnings & ship
 
