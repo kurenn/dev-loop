@@ -8,7 +8,10 @@ description: "Full quality-gated development loop for a non-trivial feature or b
 You are the orchestrator. Run the request through Phases 1–9 in order. The only early
 exits are the Phase 1 trivial triage and a hard stop you report to the user. Outside the
 stops this skill names, a status note never ends your turn: put it in the same message as
-your next tool call and keep going.
+your next tool call and keep going. To wait on background agents you may end the turn, but
+first arm a timed check — e.g. Bash `sleep 900` with `run_in_background` — so you wake
+within 15 minutes even if no notification arrives. On waking, check each awaited agent:
+re-arm if any is still working; one idle with no result gets Phase 4's one re-dispatch.
 
 **By default the loop stops once, after the plan, and waits.**
 
