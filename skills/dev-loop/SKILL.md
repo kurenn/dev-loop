@@ -69,22 +69,20 @@ Record these; every later phase uses them. Then:
 | Phase | Who | Model |
 |---|---|---|
 | 1 Triage & frame | you | this session |
-| 2 Plan | one agent | **claude-opus-5-5** |
-| 3 Critique → revise | one *fresh* critic; you apply its edits | **claude-opus-5-5** |
+| 2 Plan | one `dev-loop:planner` | **claude-opus-5-5**, effort `high` (pinned) |
+| 3 Critique → revise | one *fresh* `dev-loop:critic`; you apply its edits | **claude-opus-5-5**, effort `high` (pinned) |
 | 4 Execute | unit agents, parallel within a wave | **sonnet** |
 | 5 Mechanical gate | you (repairs by sonnet agents) | — |
 | 6 Adversarial review | Codex, else a fresh agent | external / **fable** |
-| 7 Rate | a fresh, threshold-blind `dev-loop:rater` | **claude-opus-5-5**, effort `high` |
+| 7 Rate | a fresh, threshold-blind `dev-loop:rater` | **claude-opus-5-5**, effort `high` (pinned) |
 | 8 Fix | unit agents | **sonnet** |
 | 9 Learnings & ship | you | this session |
 
-Pass these as `model:` on the Agent tool. You **cannot** set your own model — if this
+Phases 2, 3 and 7 use the plugin's agents, which pin `claude-opus-5-5` at `high` effort;
+every other row is passed as `model:` on the Agent tool and must be one of `sonnet`,
+`opus`, `haiku`, `fable`. You **cannot** set your own model — if this
 session is not running a strong model, say so once and continue; the phase models still
 apply to the agents you spawn.
-
-Phases 2, 3 and 7 name a pinned model ID on purpose: the `opus` alias resolves to a
-provider's *recommended* Opus, not to Opus 5.5. Where a row names an alias, any current
-model of that family is fine.
 
 ## The agent brief contract
 
@@ -164,7 +162,7 @@ git worktree add "$WT" -b "$BR" "$MAIN" && mkdir -p "$ART"
 - If the baseline cannot be made to run at all, **stop** and report exactly which command
   failed and what is missing. Do not implement against a broken environment.
 
-**2b — Write `$ART/PLAN.md`.** Spawn one **claude-opus-5-5** agent, told to read the
+**2b — Write `$ART/PLAN.md`.** Spawn one `subagent_type: "dev-loop:planner"`, told to read the
 repo at `$WT` and change nothing; it returns the plan as text and you write the file.
 Give it the **tier's plan cap** as a hard limit on what it returns (Light 120 lines, Full
 300); Phase 3's edits do not count against it. `PLAN.md` is a work contract, not a design essay: it is the
@@ -200,7 +198,7 @@ not fit the cap, cut the prose, not the units. It must contain:
 
 ## Phase 3 — Critique the plan, then revise it
 
-1. Spawn **one fresh claude-opus-5-5** agent — a different agent, not the planner. Give
+1. Spawn **one fresh** `subagent_type: "dev-loop:critic"` — not the planner. Give
    it only the original request and `PLAN.md`; it must not see the planner's reasoning.
    Brief it to attack: wrong problem framing, missing acceptance criteria, ownership
    collisions between units in the same wave, wave-ordering errors, unstated assumptions,
