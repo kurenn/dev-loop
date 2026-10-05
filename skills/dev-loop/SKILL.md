@@ -67,7 +67,7 @@ Record these; every later phase uses them. Then:
 | Checkpoints | plan approval after Phase 3; autonomous only on explicit request |
 | Critical paths | none |
 | Fix-round cap | from the Phase 1 tier (Light 1, Full 2) |
-| Learnings file | `docs/dev-loop-learnings.md` |
+| Learnings | `docs/dev-loop-learnings/`, one file per entry |
 | Telemetry axes | correctness, simplicity, test coverage, clarity, performance, security |
 
 ---
@@ -127,8 +127,8 @@ main checkout.
 ## Phase 1 — Triage & frame
 
 1. **Trivial?** A typo, a copy edit, a one-line config change, a comment, a single
-   obviously-safe file. If yes: tell the user the loop is overkill, make the edit
-   directly in the main checkout, and stop.
+   obviously-safe file. If yes: tell the user the loop is overkill, make the edit — in a
+   worktree and PR if the profile's rules require one — and stop.
 2. **Size tier — a hard branch, not a hint.** Estimate the work units the change
    needs (a unit is one agent's worth of work over a disjoint set of files). Then commit
    to a tier and *apply its whole row*.
@@ -165,7 +165,8 @@ git worktree add "$WT" -b "$BR" "$BASE" && mkdir -p "$ART"
   `.env*`), then run the profile's install/prepare commands.
 - **Capture a baseline** — run the profile's test, lint, typecheck and security commands
   now, before any change, and record the results in `LOOP_STATE.md`. Without a baseline
-  you cannot tell a regression from a pre-existing failure.
+  you cannot tell a regression from a pre-existing failure. Phase 4 dispatches nothing
+  until the baseline has finished.
 - If the baseline cannot be made to run at all, **stop** and report exactly which command
   failed and what is missing. Do not implement against a broken environment.
 
@@ -252,8 +253,8 @@ Do not implement anything yourself.
   you their expertise while keeping *your* plan, *your* ownership boundaries and *your*
   wave ordering — do not delegate the whole feature to another orchestrating skill, which
   would re-plan the work against a different contract.
-- **After each wave**, in this order: check ownership, answer the handoffs, run the
-  profile's test command, then **commit the wave** —
+- **After each wave**: check ownership, answer the handoffs, run the profile's test
+  command and **commit the wave** —
   `git -C "$WT" add -A && git -C "$WT" commit -m "wave <n>: <name>"`. A broken wave 1
   makes every downstream wave garbage, and the commit is what makes `$BASE...HEAD` show
   the work to Phases 6 and 7.
@@ -406,7 +407,7 @@ that run is shipping under.
 The 1–10 scores never gate anything — they go in the PR body as telemetry.
 
 - **Gate met** → Phase 9. MINOR findings are listed in the PR, not fixed, unless the user
-  asks.
+  or the project's own rules require it; such a fix is an ordinary rated commit.
 - **Not met** → dispatch **sonnet** agents (brief contract preamble, ownership from the
   plan) to fix the BLOCKING findings first, then the MAJORs. A fix must be the smallest
   change that resolves the finding; removing implementation code is a legitimate fix.
@@ -414,8 +415,9 @@ The 1–10 scores never gate anything — they go in the PR body as telemetry.
   widening a bound, or deleting a case removes coverage, not complexity. Coverage may
   only fall when the code it covered is gone. The fix agent commits its fix; **re-run
   Phase 5**, and re-run Phase 7 as a **delta judgment**: give the new rater
-  `RATING-round-N.md` verbatim plus the diff of the fix commit, and ask it to verify each
-  prior finding was actually addressed and to flag anything the fix broke.
+  `RATING-round-N.md` verbatim plus the diff of the fix commit, and nothing about the gate,
+  the finding counts or what was left open; ask it to verify each prior finding was
+  actually addressed and to flag anything the fix broke.
 - Re-run Phase 6 on a fix round only if the fix touched a critical path or changed the
   approach; otherwise the delta judgment is enough.
 - **A fix round runs in strict sequence — fix, Phase 5, Phase 6 if required, then the
@@ -432,16 +434,18 @@ The 1–10 scores never gate anything — they go in the PR body as telemetry.
   judgment before it is pushed; a judgment that raises a new MAJOR or BLOCKING is a fix
   round and counts against the cap. Fetch, then merge a moved `$BASE` as its own commit,
   re-run Phase 5 against the new base, and include the merge in the next delta judgment.
-  Phase 9's learnings commit is the one exception: yours, unrated, and touching only the
-  learnings file. Before every push, list the commits on `$BR` since the last rating —
+  Phase 9's learnings commit is the one exception: yours, unrated, and touching only its
+  learnings entry. Before every push, list the commits on `$BR` since the last rating —
   yours or anyone's — and rate any that no delta judgment has seen.
 
 ## Phase 9 — Learnings & ship
 
-1. **Append learnings** to the profile's learnings file **inside the worktree** (so they
-   ship with the PR and do not dirty the main checkout). Insert newest-first, directly
-   below the `## Entry format` heading. Create the file with the standard header if it
-   does not exist. Capture only durable, reusable insight — a non-obvious gotcha, a
+1. **Write learnings** as one new file, `<YYYY-MM-DD>-<slug>.md`, in the profile's
+   learnings directory **inside the worktree**, so they ship with the PR and two PRs never
+   touch the same lines. If the profile names a single file such as
+   `docs/dev-loop-learnings.md`, leave it as the archive and write to a directory of the
+   same name without `.md`. Use the entry format from the directory's `README.md`, or from
+   the archive file. Capture only durable, reusable insight — a non-obvious gotcha, a
    pattern worth repeating, a recurring adversarial challenge, a place the plan was
    wrong. Map, not diary. Nothing user-specific or secret. **Run this step even when the
    loop stopped at the gate** — failed runs teach the most.
