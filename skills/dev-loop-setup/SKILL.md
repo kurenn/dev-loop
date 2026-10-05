@@ -1,6 +1,6 @@
 ---
 name: dev-loop-setup
-description: "Prepare any repository — any language or framework — to run /dev-loop. Detects and verifies the project's install, test, lint, typecheck and security commands, checks gh auth and optional accelerators (codex, stack specialist subagents), writes a '## Dev-loop config' profile into CLAUDE.md, gitignores .worktrees/, and creates the learnings file. Run once per repo before the first /dev-loop."
+description: "Prepare any repository — any language or framework — to run /dev-loop. Detects and verifies the project's install, test, lint, typecheck and security commands, checks gh auth and optional accelerators (codex, stack specialist subagents), writes a '## Dev-loop config' profile into CLAUDE.md, gitignores .worktrees/, and creates the learnings directory. Run once per repo before the first /dev-loop."
 ---
 
 # /dev-loop-setup — prepare a repo for the loop
@@ -106,7 +106,7 @@ Project profile read by the `/dev-loop` skill (@kurenn/dev-loop). Verified <YYYY
 - Fix-round cap: from tier (Light 1, Full 2)
 
 **Ship**
-- Learnings file: docs/dev-loop-learnings.md
+- Learnings: docs/dev-loop-learnings/ (one file per entry)
 - PR conventions: <repo-specific quirks — or standard gh pr create>
 ```
 
@@ -117,21 +117,21 @@ second full checkout sitting in the working tree: `git status` noise, and test r
 linters and file watchers descending into it. Add `.worktrees/` to `.gitignore` if it
 isn't there.
 
-## Step 5 — Create the learnings file
+## Step 5 — Create the learnings directory
 
-If the configured learnings file doesn't exist, create it with this header so Phase 9 has
-a defined insertion point:
+Each loop writes its learnings as one new file, so concurrent PRs never conflict on them.
+If the configured directory doesn't exist, create it with this `README.md`. If the repo
+already has a single `docs/dev-loop-learnings.md`, keep it as the archive beside the new
+directory:
 
 ```markdown
 # Dev-loop learnings
 
-Durable, reusable insight captured by `/dev-loop`. Map, not diary — a gotcha worth
-remembering, a pattern worth repeating, a place a plan was wrong. Nothing user-specific
-or secret.
+Durable, reusable insight captured by `/dev-loop`, one file per entry, named
+`YYYY-MM-DD-<slug>.md`. Map, not diary — a gotcha worth remembering, a pattern worth
+repeating, a place a plan was wrong. Nothing user-specific or secret.
 
 ## Entry format
-
-New entries go directly below this heading, newest first.
 
 ### YYYY-MM-DD — <short title>
 **Context:** <feature/bug + PR # if any>

@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.6.2
+
+Fixes from auditing the rest of the 2026-10-02 loops: 12 PRs from 0.6.0 loops, none of
+them carrying an unrated commit.
+
+**Learnings are one file per entry.** Every loop inserted its entry at the same spot in
+`docs/dev-loop-learnings.md`, so each merge conflicted the next open PR. That happened at
+least five times in one day, and each conflict cost a merge agent, a delta rating and a
+CI run. Entries now go to `docs/dev-loop-learnings/<YYYY-MM-DD>-<slug>.md`. A profile
+that still names the single file keeps it as the archive, and new entries go to the
+directory of the same name, so no repo has to change its config. `/dev-loop-setup` now
+creates the directory with a `README.md` that holds the entry format.
+
+**The baseline finishes before Phase 4.** In one loop the baseline was still running
+when the units started editing, and three tests failed against the units' half-written
+code rather than the original. The orchestrator caught it, but it was luck.
+
+**A wave's tests and commit have no required order.** Three loops committed a wave
+seconds before testing it, with no harm: units run their own scoped tests, and Phase 5
+runs everything. Running the tests after each wave stays; the order is gone.
+
+**A delta brief says nothing about the verdict.** One orchestrator told its delta raters
+"gate: 0 BLOCKING, 0 MAJOR" and which MINORs were "left by design", which is the
+threshold the rater is meant to be blind to. A delta brief now carries the prior rating
+verbatim and the diff, and nothing about the gate, the counts or what was left open.
+
+**Project rules can require a MINOR fix.** Two loops fixed MINORs after the gate was met
+because the project's own rules require comments to be true. MINORs are still listed
+rather than fixed by default; a user or project rule can require a fix, which is then an
+ordinary rated commit.
+
+**The trivial path respects a project's worktree rule.** It said to edit in the main
+checkout. Loops in a repo that forbids that rightly used a worktree and a PR, and the
+text now says so.
+
 ## 0.6.1
 
 Fixes found by monitoring and auditing the first 0.6.0 loops on 2026-10-02: 8 loops across
