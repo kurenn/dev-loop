@@ -253,8 +253,9 @@ Do not implement anything yourself.
   you their expertise while keeping *your* plan, *your* ownership boundaries and *your*
   wave ordering — do not delegate the whole feature to another orchestrating skill, which
   would re-plan the work against a different contract.
-- **After each wave**: check ownership, answer the handoffs, run the profile's test
-  command and **commit the wave** —
+- **After each wave**: check ownership, answer the handoffs, run the profile's scoped
+  test command on the test files the wave added or changed (the full suite if the profile
+  has no scoped command; Phase 5 runs it either way) and **commit the wave** —
   `git -C "$WT" add -A && git -C "$WT" commit -m "wave <n>: <name>"`. A broken wave 1
   makes every downstream wave garbage, and the commit is what makes `$BASE...HEAD` show
   the work to Phases 6 and 7.
