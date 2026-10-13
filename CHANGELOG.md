@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.6.3
+
+**The check after each wave runs the wave's own tests, not the full suite.** It now runs
+the profile's scoped test command on the test files the wave added or changed. A loop
+with three or four waves had been running the full suite once per wave, and each of those
+runs mostly duplicated Phase 5, which follows. Units already run their own scoped tests
+before handing back, so the wave check only has to confirm that a wave's tests pass
+together. Profiles without a scoped command still run the full suite here.
+
+The full suite still runs where it protects something. The Phase 2 baseline runs it once,
+so Phase 5 can tell a new failure from a pre-existing one. Phase 5 runs it once per round,
+because a change's own tests cannot show that it broke something elsewhere, and a green
+gate has to mean that. The flake rerun also uses the full suite.
+
 ## 0.6.2
 
 Fixes from auditing the rest of the 2026-10-02 loops: 12 PRs from 0.6.0 loops, none of
